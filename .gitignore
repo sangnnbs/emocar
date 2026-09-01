@@ -1,0 +1,13 @@
+# build outputs
+server/emocar-server
+server/emocar-server.exe
+server/dist/
+
+# personal GIF libraries and uploads — scanned at runtime, never part of the repo
+# (anim_data.h stays committed so the firmware builds without them;
+#  regenerate it from gifs/ with mkanim.py)
+emoji_lib/
+downloads/
+gifs/
+
+.DS_Store

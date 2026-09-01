@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emocar</title>
+<style>
+  :root {
+    --bg: #101216; --panel: #191c22; --edge: #2a2e37; --text: #d6dae2;
+    --dim: #8a909c; --accent: #4da3ff; --ok: #46c46e; --bad: #e05555;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 16px 20px 60px; }
+  h1 { font-size: 20px; margin: 8px 0 2px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; color: var(--dim); text-transform: uppercase;
+       letter-spacing: .06em; }
+  #carline { color: var(--dim); }
+  #dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+         background: var(--bad); margin-right: 6px; }
+  #dot.on { background: var(--ok); }
+
+  .states { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+          padding: 12px; cursor: pointer; text-align: center; }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card.live .tag { color: var(--ok); }
+  .card h3 { margin: 0 0 8px; font-size: 14px; }
+  .card .tag { font-size: 11px; color: var(--dim); }
+  .oled { width: 100%; aspect-ratio: var(--oled-ar, 2 / 1); background: #000; border-radius: 4px;
+          display: flex; align-items: center; justify-content: center;
+          color: #444; font-size: 12px; overflow: hidden; }
+  .oled img { width: 100%; image-rendering: pixelated; }
+  #profline { margin: 10px 0 2px; color: var(--dim); display: flex; align-items: center; gap: 8px; }
+  #profwarn { color: var(--bad); font-size: 13px; }
+
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+             gap: 10px; }
+  .item { background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+          padding: 8px; cursor: pointer; }
+  .item:hover { border-color: var(--accent); }
+  .item .oled { margin-bottom: 6px; }
+  .item .name { font-size: 12px; color: var(--dim); word-break: break-all; }
+  .item .name b { color: var(--text); font-weight: 500; }
+  .item .onstate { color: var(--accent); font-weight: 600; }
+  #tinfo { font-size: 13px; color: var(--dim); margin-top: 6px; min-height: 18px; }
+  #tinfo .warn { color: #e0a53c; }
+
+  #tunebox .oled img { cursor: grab; touch-action: none; user-select: none; }
+  #tunebox .oled img:active { cursor: grabbing; }
+  .hint { color: var(--dim); font-size: 12px; }
+  #tunebox input[type=number] { width: 64px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--edge); border-radius: 6px; padding: 2px 6px; }
+  .axis { color: var(--dim); font-size: 12px; }
+  #tune { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+          align-items: center; justify-content: center; }
+  #tune.open { display: flex; }
+  #tunebox { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px;
+             padding: 18px; width: min(560px, 94vw); }
+  #tunebox .oled { margin: 10px 0 14px; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+  .row label { color: var(--dim); min-width: 74px; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  select, button { background: #22262e; color: var(--text); border: 1px solid var(--edge);
+                   border-radius: 6px; padding: 6px 12px; font: inherit; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06131f;
+                   font-weight: 600; cursor: pointer; }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  .statepick button.sel { border-color: var(--accent); color: var(--accent); }
+  #msg { min-height: 20px; font-size: 13px; }
+  #msg.ok { color: var(--ok); } #msg.bad { color: var(--bad); }
+  #uplabel { display: inline-block; border: 1px dashed var(--edge); border-radius: 8px;
+             padding: 6px 14px; color: var(--dim); cursor: pointer; }
+  #uplabel:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>emocar</h1>
+  <div id="carline"><span id="dot"></span><span id="cartext">looking for the car…</span></div>
+  <div id="profline"><label for="profsel">display</label>
+    <select id="profsel"></select><span id="profwarn"></span></div>
+
+  <h2>On the car</h2>
+  <div class="states" id="states"></div>
+
+  <h2>Library
+    <label id="uplabel">+ add GIF<input type="file" id="upfile" accept=".gif,.qgif" hidden></label>
+  </h2>
+  <div class="gallery" id="gallery"></div>
+</main>
+
+<div id="tune">
+  <div id="tunebox">
+    <div><b id="tname"></b> → <span class="statepick" id="statepick"></span></div>
+    <div id="tinfo"></div>
+    <div class="oled"><img id="timg" alt="preview"></div>
+    <div id="knobs">
+      <div class="row" id="rowthr"><label>threshold</label>
+        <input type="range" id="kthr" min="1" max="254" value="128"><span id="kthrv">128</span></div>
+      <div class="row"><span id="monoknobs"><label>invert</label><input type="checkbox" id="kinv">
+        <label style="min-width:0">dither</label>
+        <select id="kdither">
+          <option value="none">none</option><option value="bayer">bayer</option>
+          <option value="floyd">floyd</option>
+        </select></span>
+        <label style="min-width:0">scale</label>
+        <select id="kscale">
+          <option value="fit">fit</option><option value="fit_width">fit_width</option>
+          <option value="fit_height">fit_height</option><option value="stretch">stretch</option>
+        </select></div>
+      <div class="row"><label>zoom</label>
+        <input type="range" id="kzoom" min="50" max="400" step="5" value="100"><span id="kzoomv">100%</span></div>
+      <div class="row"><label>pan</label>
+        <span class="axis">x</span> <input type="number" id="kpanx" value="0" step="1">
+        <span class="axis">y</span> <input type="number" id="kpany" value="0" step="1">
+        <button id="kreset" type="button">reset</button></div>
+      <div class="row hint">drag the preview to pan (or type x/y: + is right/down) · scroll to zoom · double-click resets</div>
+    </div>
+    <div class="row">
+      <button class="primary" id="apply">Send to car</button>
+      <button id="cancel">Close</button>
+      <span id="msg"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const STATES = [
+  { name: 'NORMAL',   emoji: '\u{1F642}' },
+  { name: 'FAST',     emoji: '\u{1F62E}' },
+  { name: 'SPINNING', emoji: '\u{1F635}' },
+];
+const $ = id => document.getElementById(id);
+let selState = 0;          // state targeted by the next assignment
+let tuneName = null, tuneKind = null;
+let panX = 0, panY = 0;    // panel-pixel pan of the zoomed image (drag on the preview)
+let ASSIGN = [null, null, null];   // per state: {name,frames,bytes} the server last pushed
+
+// One gif per state, visibly: names on the cards, badges in the library.
+async function loadAssignments() {
+  try { ASSIGN = await (await fetch('/api/assignments')).json(); } catch { return; }
+  ASSIGN = ASSIGN || [null, null, null];
+  applyBadges();
+}
+function statesOf(name) {          // every state a library gif is assigned to
+  return STATES.map((_, i) => i).filter(i => ASSIGN[i] && ASSIGN[i].name === name);
+}
+function applyBadges() {
+  for (const el of document.querySelectorAll('.item')) {
+    const tag = el.querySelector('.onstate');
+    if (tag) tag.remove();
+    const on = statesOf(el.dataset.name);
+    if (on.length) {
+      const span = document.createElement('span');
+      span.className = 'onstate';
+      span.textContent = ` · on ${on.map(i => STATES[i].name).join(' + ')}`;
+      el.querySelector('.name').appendChild(span);
+    }
+  }
+}
+
+// ---------------- display profiles ----------------
+let PROFILES = [];         // from /api/profiles
+let profile = null;        // selected profile object
+let profilePinned = false; // user chose manually — stop auto-following the car
+let carProfileId = null;   // what the car's firmware reports (null = unknown/old firmware)
+
+function setProfile(id, pinned) {
+  const p = PROFILES.find(p => p.id === id) || PROFILES[0];
+  if (!p) return;
+  profile = p;
+  if (pinned) { profilePinned = true; localStorage.setItem('emocar.profile', p.id); }
+  $('profsel').value = p.id;
+  document.documentElement.style.setProperty('--oled-ar', `${p.width} / ${p.height}`);
+  const d = p.defaults || {};                    // knobs restart from the profile's defaults
+  $('kthr').value = d.threshold ?? 128; $('kthrv').textContent = $('kthr').value;
+  $('kinv').checked = !!d.invert;
+  $('kscale').value = d.scale || 'fit';
+  $('kdither').value = d.dither || 'none';
+  $('kzoom').value = d.zoom || 100; $('kzoomv').textContent = $('kzoom').value + '%';
+  panX = panY = 0; $('kpanx').value = 0; $('kpany').value = 0;
+  $('kpanx').min = -2 * p.width;  $('kpanx').max = 2 * p.width;
+  $('kpany').min = -2 * p.height; $('kpany').max = 2 * p.height;
+  updateProfileWarn();
+  loadLibrary();
+  STATES.forEach((_, i) => refreshSlot(i));
+}
+function updateProfileWarn() {
+  $('profwarn').textContent = (carProfileId && profile && carProfileId !== profile.id)
+    ? `car has ${carProfileId} — pushes will be refused` : '';
+}
+async function loadProfiles() {
+  PROFILES = await (await fetch('/api/profiles')).json();
+  $('profsel').innerHTML = PROFILES.map(p => `<option value="${p.id}">${p.label}</option>`).join('');
+  const saved = localStorage.getItem('emocar.profile');
+  profilePinned = !!saved && PROFILES.some(p => p.id === saved);
+  setProfile(profilePinned ? saved : PROFILES[0].id, false);
+}
+$('profsel').onchange = () => setProfile($('profsel').value, true);
+
+// ---------------- state cards ----------------
+function buildCards() {
+  $('states').innerHTML = STATES.map((s, i) => `
+    <div class="card" id="card${i}">
+      <h3>${s.emoji} ${s.name}</h3>
+      <div class="oled" id="slot${i}">placeholder</div>
+      <div class="tag" id="tag${i}">–</div>
+    </div>`).join('');
+  STATES.forEach((_, i) => $('card' + i).onclick = () => selectState(i));
+  selectState(0);
+}
+function selectState(i) {
+  selState = i;
+  STATES.forEach((_, k) => $('card' + k).classList.toggle('sel', k === i));
+}
+function refreshSlot(i) {
+  const img = new Image();
+  img.onload  = () => { const s = $('slot' + i); s.textContent = ''; s.appendChild(img); };
+  img.onerror = () => { $('slot' + i).textContent = 'placeholder'; };
+  img.src = `/api/car/preview/${i}?ts=${Date.now()}`;
+}
+
+// ---------------- car status ----------------
+async function poll() {
+  try {
+    const r = await (await fetch('/api/car/status')).json();
+    $('dot').classList.toggle('on', r.online);
+    if (r.online) {
+      const st = r.status;
+      carProfileId = st.profile || null;
+      if (carProfileId && !profilePinned && profile && carProfileId !== profile.id)
+        setProfile(carProfileId, false);          // follow the car's display
+      updateProfileWarn();
+      $('cartext').textContent =
+        `online — state ${st.state}, heap ${(st.heap / 1024) | 0} KB, up ${st.uptime}s` +
+        (st.profile ? `, display ${st.profile}` : '');
+      STATES.forEach((s, i) => {
+        const sl = st.slots[i];
+        const a = ASSIGN[i];
+        const who = sl.file && a && a.bytes === sl.bytes ? `${a.name} · ` : '';
+        $('tag' + i).textContent = sl.file ? `${who}${sl.frames} frames · ${(sl.bytes/1024).toFixed(1)} KB`
+                                           : 'placeholder';
+        $('card' + i).classList.toggle('live', st.state === s.name.toLowerCase());
+      });
+    } else {
+      $('cartext').textContent = 'offline — join the "emocar" WiFi network';
+    }
+    return r.online;
+  } catch { $('dot').classList.remove('on'); $('cartext').textContent = 'server error'; return false; }
+}
+
+// ---------------- library ----------------
+async function loadLibrary() {
+  const lib = await (await fetch('/api/library')).json();
+  const prof = profile ? `&profile=${encodeURIComponent(profile.id)}` : '';
+  $('gallery').innerHTML = (lib || []).map(e => `
+    <div class="item" data-name="${e.name}" data-kind="${e.kind}">
+      <div class="oled"><img loading="lazy" src="/api/preview?name=${encodeURIComponent(e.name)}${prof}"></div>
+      <div class="name"><b>${e.name}</b><br>${e.kind} · ${(e.bytes / 1024).toFixed(0)} KB</div>
+    </div>`).join('');
+  for (const el of document.querySelectorAll('.item'))
+    el.onclick = () => openTune(el.dataset.name, el.dataset.kind);
+  applyBadges();
+}
+
+// ---------------- tune & assign ----------------
+function tuneURL() {
+  const p = new URLSearchParams({ name: tuneName, profile: profile.id,
+                                  threshold: $('kthr').value, dither: $('kdither').value,
+                                  invert: $('kinv').checked ? '1' : '0', scale: $('kscale').value,
+                                  zoom: $('kzoom').value, panx: panX, pany: panY });
+  return '/api/preview?' + p;
+}
+function openTune(name, kind) {
+  tuneName = name; tuneKind = kind;
+  $('tname').textContent = name;
+  $('knobs').style.display = kind === 'qgif' ? 'none' : '';   // ready-made: no knobs
+  const mono = profile.format === 'mono1';                    // threshold/dither/invert are 1-bit knobs
+  $('rowthr').style.display = mono ? '' : 'none';
+  $('monoknobs').style.display = mono ? '' : 'none';
+  $('statepick').innerHTML = STATES.map((s, i) =>
+    `<button data-i="${i}" class="${i === selState ? 'sel' : ''}">${s.emoji} ${s.name}</button>`).join(' ');
+  for (const b of $('statepick').querySelectorAll('button'))
+    b.onclick = () => { selectState(+b.dataset.i); openTune(name, kind); };
+  // make "1 gif per state" visible: what the target has now, and whether this
+  // gif is already on a different state
+  const cur = ASSIGN[selState];
+  const elsewhere = statesOf(name).filter(i => i !== selState);
+  let info = `${STATES[selState].name} now has: ${cur ? cur.name : 'placeholder / unknown'}`;
+  if (elsewhere.length)
+    info += ` — <span class="warn">⚠ ${name} is already on ${elsewhere.map(i => STATES[i].name).join(' + ')}</span>`;
+  $('tinfo').innerHTML = info;
+  $('msg').textContent = ''; $('msg').className = '';
+  $('timg').src = tuneURL();
+  $('tune').classList.add('open');
+}
+let debounce = null;
+function knobChanged() {
+  $('kthrv').textContent = $('kthr').value;
+  $('kzoomv').textContent = $('kzoom').value + '%';
+  clearTimeout(debounce);
+  debounce = setTimeout(() => { $('timg').src = tuneURL(); }, 150);
+}
+$('kthr').oninput = knobChanged; $('kinv').onchange = knobChanged;
+$('kscale').onchange = knobChanged; $('kdither').onchange = knobChanged;
+$('kzoom').oninput = knobChanged;
+
+// Pan has one setter shared by dragging, typing, and reset, so the number
+// inputs and the drag state can never disagree. Panel pixels, + = right/down.
+const clampPan = (v, d) => Math.min(2 * d, Math.max(-2 * d, Math.round(v) || 0));
+function setPan(x, y, typed) {
+  panX = clampPan(x, profile.width);
+  panY = clampPan(y, profile.height);
+  if (!typed) { $('kpanx').value = panX; $('kpany').value = panY; }
+  knobChanged();
+}
+$('kpanx').oninput = $('kpany').oninput = () => setPan(+$('kpanx').value, +$('kpany').value, true);
+// on blur, snap the inputs to the clamped values actually in effect
+$('kpanx').onchange = $('kpany').onchange = () => { $('kpanx').value = panX; $('kpany').value = panY; };
+function resetView() {
+  $('kzoom').value = (profile.defaults || {}).zoom || 100;
+  setPan(0, 0);
+}
+$('kreset').onclick = resetView;
+{
+  const timg = $('timg');
+  let drag = null;
+  timg.draggable = false;
+  timg.ondblclick = () => { if (tuneKind !== 'qgif') resetView(); };
+  timg.onwheel = e => {
+    if (tuneKind === 'qgif') return;
+    e.preventDefault();
+    $('kzoom').value = Math.min(400, Math.max(50, +$('kzoom').value + (e.deltaY < 0 ? 10 : -10)));
+    knobChanged();
+  };
+  timg.onpointerdown = e => {
+    if (tuneKind === 'qgif') return;
+    e.preventDefault();
+    try { timg.setPointerCapture(e.pointerId); } catch {}
+    drag = { x: e.clientX, y: e.clientY, px: panX, py: panY };
+  };
+  timg.onpointermove = e => {
+    if (!drag) return;
+    setPan(drag.px + (e.clientX - drag.x) * profile.width / timg.clientWidth,
+           drag.py + (e.clientY - drag.y) * profile.height / timg.clientHeight);
+  };
+  timg.onpointerup = timg.onpointercancel = () => { drag = null; };
+}
+$('cancel').onclick = () => $('tune').classList.remove('open');
+$('tune').onclick = e => { if (e.target === $('tune')) $('tune').classList.remove('open'); };
+
+$('apply').onclick = async () => {
+  $('apply').disabled = true;
+  $('msg').textContent = 'converting + sending…'; $('msg').className = '';
+  try {
+    const r = await fetch('/api/assign', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: selState, name: tuneName, profile: profile.id,
+                             threshold: +$('kthr').value, dither: $('kdither').value,
+                             invert: $('kinv').checked, scale: $('kscale').value,
+                             zoom: +$('kzoom').value, panx: panX, pany: panY }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      await loadAssignments();
+      refreshSlot(selState); poll();
+      openTune(tuneName, tuneKind);          // refresh the "now has" line + warning
+      $('msg').textContent = `on the car — ${j.frames} frames, ${(j.bytes / 1024).toFixed(1)} KB`;
+      $('msg').className = 'ok';
+    } else { $('msg').textContent = j.error || 'failed'; $('msg').className = 'bad'; }
+  } catch (e) { $('msg').textContent = e.message; $('msg').className = 'bad'; }
+  $('apply').disabled = false;
+};
+
+// ---------------- upload ----------------
+$('upfile').onchange = async () => {
+  const f = $('upfile').files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('file', f);
+  const r = await fetch('/api/upload', { method: 'POST', body: fd });
+  const j = await r.json();
+  if (j.ok) loadLibrary();
+  else alert(j.error || 'upload failed');
+  $('upfile').value = '';
+};
+
+// ---------------- boot ----------------
+buildCards();
+loadAssignments()
+  .then(() => loadProfiles())        // also does the first loadLibrary()/refreshSlot()
+  .then(() => poll())
+  .then(on => { if (on) STATES.forEach((_, i) => refreshSlot(i)); });
+setInterval(async () => {
+  const wasOff = !$('dot').classList.contains('on');
+  const on = await poll();
+  if (on && wasOff) STATES.forEach((_, i) => refreshSlot(i));   // car just appeared
+}, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "_comment": "Master list of display profiles. The Go server embeds this file; mkanim.py reads it; the firmware's config.h DISP_* block must match the entry for the panel it is compiled for. Formats: mono1 (1 bpp, MSB=left, bit 1=dark), gray4 (2 px/byte, high nibble=left, 0=black 15=white), rgb565 (2 B/px big-endian).",
+  "profiles": [
+    {
+      "id": "sh1106_128x64",
+      "label": "SH1106 128×64 mono OLED (I2C)",
+      "width": 128,
+      "height": 64,
+      "format": "mono1",
+      "defaults": { "threshold": 128, "invert": false, "scale": "stretch", "dither": "none", "zoom": 110 }
+    }
+  ]
+}

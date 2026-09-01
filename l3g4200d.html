@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiến thức cảm biến L3G4200D (GY-50) — emocar</title>
+<style>
+  :root {
+    --bg:#f4f2ee; --panel:#ffffff; --ink:#1c1a17; --ink-soft:#5d574e;
+    --ink-faint:#8a8378; --rule:#ddd8cf;
+    --brand:#2563eb; --brand-light:#dbeafe;
+    --pwr:#c0392b; --gnd:#3f3f3f; --sig1:#2f6fb3; --sig2:#8e44ad; --ok:#1f7a4d; --warn:#d35400;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#16181a; --panel:#1e2124; --ink:#e9e6e1; --ink-soft:#a8a29a;
+      --ink-faint:#767068; --rule:#32363a;
+      --brand:#3b82f6; --brand-light:#1e3a8a;
+      --pwr:#e8695c; --gnd:#9a9a9a; --sig1:#7aa8dc; --sig2:#c39bd3; --ok:#5ec98d; --warn:#e67e22;
+    }
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    line-height:1.65; padding:2.5rem 1.25rem 5rem;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:2.5rem; }
+  header { border-bottom:2px solid var(--rule); padding-bottom:1.5rem; }
+  h1 { font-size:clamp(1.7rem, 4vw, 2.4rem); font-weight:750; letter-spacing:-.02em; color:var(--ink); margin-bottom:.5rem; }
+  .sub { color:var(--ink-soft); font-size:1.05rem; }
+
+  h2 { font-size:1.25rem; font-weight:700; color:var(--ink); margin-bottom:1rem; display:flex; align-items:center; gap:.5rem; }
+  h3 { font-size:1rem; font-weight:650; margin:1.2rem 0 .5rem; color:var(--ink); }
+
+  .card { background:var(--panel); border:1px solid var(--rule); border-radius:12px; padding:1.5rem 1.75rem; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+  @media (max-width:768px) { .grid-2 { grid-template-columns:1fr; } }
+
+  .formula-box {
+    background:var(--brand-light); border-left:4px solid var(--brand);
+    padding:1.2rem 1.5rem; border-radius:0 8px 8px 0; margin:1rem 0;
+  }
+  .formula-title { font-weight:700; font-size:.9rem; color:var(--brand); text-transform:uppercase; letter-spacing:.05em; margin-bottom:.4rem; }
+  .formula-math { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:1.15rem; font-weight:700; color:var(--ink); }
+  .formula-desc { font-size:.88rem; color:var(--ink-soft); margin-top:.5rem; }
+
+  svg { display:block; width:100%; height:auto; }
+  .diagram-container { background:var(--panel); border:1px solid var(--rule); border-radius:10px; padding:1.25rem; overflow-x:auto; }
+
+  table { width:100%; border-collapse:collapse; font-size:.9rem; margin-top:.5rem; }
+  th, td { text-align:left; padding:.65rem .85rem; border-bottom:1px solid var(--rule); }
+  th { font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-faint); font-weight:700; background:rgba(0,0,0,.02); }
+  @media (prefers-color-scheme: dark) { th { background:rgba(255,255,255,.02); } }
+
+  .tag { display:inline-block; font-size:.75rem; font-weight:700; padding:.15rem .45rem; border-radius:4px; margin-right:.4rem; }
+  .tag-ok { background:rgba(31,122,77,.15); color:var(--ok); }
+  .tag-warn { background:rgba(211,84,0,.15); color:var(--warn); }
+
+  .callout {
+    border-left:4px solid var(--warn); background:rgba(211,84,0,.08);
+    padding:1rem 1.25rem; border-radius:0 8px 8px 0; margin:1rem 0; font-size:.92rem;
+  }
+  .callout b:first-child { color:var(--warn); }
+
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em; background:rgba(0,0,0,.06); padding:.15em .4em; border-radius:4px; }
+  @media (prefers-color-scheme: dark) { code { background:rgba(255,255,255,.08); } }
+
+  .nav-links { display:flex; gap:1rem; font-size:.9rem; font-weight:600; margin-top:.5rem; flex-wrap:wrap; }
+  .nav-links a { color:var(--brand); text-decoration:none; display:inline-flex; align-items:center; gap:.3rem; }
+  .nav-links a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Cảm biến gyro L3G4200D (module GY-50)</h1>
+  <p class="sub">Tài liệu kiến thức cho project <b>emocar</b>: con quay hồi chuyển MEMS 3 trục — nguyên lý Coriolis, pinout GY-50, thanh ghi I²C, công thức chuyển đổi và cách suy ra 3 state <code>normal / fast / spinning</code>.</p>
+  <div class="nav-links">
+    <a href="../pinout_s3_supermini.html">👉 Pinout tham khảo board khác trong repo</a>
+  </div>
+</header>
+
+<!-- 1. TỔNG QUAN -->
+<section class="card">
+  <h2>1. Tổng quan: nó đo cái gì — và KHÔNG đo cái gì</h2>
+  <p>L3G4200D (STMicroelectronics) là <b>gyroscope số 3 trục</b>: đo <b>tốc độ góc</b> (angular rate, đơn vị °/s hay <i>dps</i>) quanh 3 trục X (roll), Y (pitch), Z (yaw). Đầu ra 16-bit signed cho mỗi trục, giao tiếp I²C hoặc SPI.</p>
+
+  <div class="callout">
+    <b>⚠ Giới hạn quan trọng cho emocar:</b> đây là gyro <b>thuần</b> — không có accelerometer. Nó không đo gia tốc tuyến tính hay vận tốc xe. State <code>spinning</code> đọc trực tiếp từ trục Z; state <code>fast</code> phải suy gián tiếp qua <b>độ rung</b> (variance tín hiệu khi xe lăn bánh) — xem mục 6.
+  </div>
+
+  <table>
+    <tr><th>Thông số</th><th>Giá trị</th><th>Ghi chú</th></tr>
+    <tr><td>Dải đo (full scale)</td><td>±250 / ±500 / ±2000 dps</td><td>Chọn bằng <code>CTRL_REG4</code>; emocar nên dùng ±2000 để không bão hòa khi xoay tròn</td></tr>
+    <tr><td>Độ phân giải</td><td>16-bit signed / trục</td><td>raw từ −32768 đến +32767</td></tr>
+    <tr><td>Tốc độ ra dữ liệu (ODR)</td><td>100 / 200 / 400 / 800 Hz</td><td>Chọn bằng <code>CTRL_REG1</code>; 100–200 Hz là thừa đủ cho emocar</td></tr>
+    <tr><td>Nguồn chip</td><td>2.4 – 3.6 V</td><td>Module GY-50 có LDO riêng, chấp nhận cả 5V — nhưng với ESP32-C3 cứ cấp 3.3V</td></tr>
+    <tr><td>Dòng tiêu thụ</td><td>~6.1 mA (normal)</td><td>Có chế độ power-down (~1.5 µA) và sleep</td></tr>
+    <tr><td>Cảm biến nhiệt phụ</td><td>8-bit, <code>OUT_TEMP</code></td><td>Chỉ đo <i>tương đối</i> (−1 LSB/°C), không phải nhiệt độ tuyệt đối</td></tr>
+    <tr><td>Trạng thái sản xuất</td><td>Đã ngừng (EOL)</td><td>ST thay bằng L3GD20/I3G4250D; module GY-50 vẫn bán tràn lan, thư viện Arduino sẵn có</td></tr>
+  </table>
+</section>
+
+<!-- 2. NGUYÊN LÝ -->
+<section class="card">
+  <h2>2. Nguyên lý MEMS: hiệu ứng Coriolis</h2>
+  <div class="grid-2" style="align-items:center;">
+    <div>
+      <p style="font-size:.92rem;">Bên trong chip có một khối lượng nhỏ (proof mass) được <b>rung liên tục</b> theo một phương cố định bằng lực tĩnh điện. Khi cả chip <b>xoay</b>, lực Coriolis đẩy khối lượng đó lệch sang phương <i>vuông góc</i> với phương rung:</p>
+      <div class="formula-box">
+        <div class="formula-title">Lực Coriolis</div>
+        <div class="formula-math">F = −2 · m · (ω × v)</div>
+        <div class="formula-desc">m: khối lượng rung, v: vận tốc rung, ω: tốc độ góc cần đo. Độ lệch tỉ lệ thuận với ω.</div>
+      </div>
+      <p style="font-size:.92rem;">Độ lệch cực nhỏ này làm thay đổi <b>điện dung</b> giữa các răng lược (comb fingers); mạch ASIC khuếch đại, giải điều chế và số hóa thành giá trị 16-bit. Ba cấu trúc rung đặt vuông góc nhau cho ra 3 trục X/Y/Z.</p>
+    </div>
+    <div class="diagram-container">
+      <svg viewBox="0 0 440 230" xmlns="http://www.w3.org/2000/svg" fill="none">
+        <text x="220" y="20" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="bold">Khối rung + lực Coriolis khi chip xoay</text>
+        <!-- frame -->
+        <rect x="90" y="45" width="260" height="150" rx="8" stroke="var(--ink-faint)" stroke-width="2" stroke-dasharray="6 4"/>
+        <text x="100" y="62" fill="var(--ink-faint)" font-size="10">khung chip (đang xoay ω)</text>
+        <!-- proof mass -->
+        <rect x="185" y="95" width="70" height="50" rx="4" fill="var(--brand-light)" stroke="var(--brand)" stroke-width="2"/>
+        <text x="220" y="124" text-anchor="middle" fill="var(--ink)" font-size="11" font-weight="bold">m</text>
+        <!-- drive motion -->
+        <path d="M 150 120 H 178" stroke="var(--sig1)" stroke-width="2.5" marker-end="url(#ar1)"/>
+        <path d="M 290 120 H 262" stroke="var(--sig1)" stroke-width="2.5" marker-end="url(#ar1)"/>
+        <text x="150" y="108" fill="var(--sig1)" font-size="10.5" font-weight="bold">rung v (drive)</text>
+        <!-- coriolis -->
+        <path d="M 220 90 V 62" stroke="var(--warn)" stroke-width="2.5" marker-end="url(#ar2)"/>
+        <text x="228" y="72" fill="var(--warn)" font-size="10.5" font-weight="bold">lệch Coriolis ∝ ω</text>
+        <!-- rotation arrow -->
+        <path d="M 360 150 A 45 45 0 1 1 360 90" stroke="var(--sig2)" stroke-width="2.5" marker-end="url(#ar3)"/>
+        <text x="382" y="124" fill="var(--sig2)" font-size="11" font-weight="bold">ω</text>
+        <!-- sense fingers -->
+        <g stroke="var(--ink-faint)" stroke-width="2">
+          <path d="M 195 95 V 82"/><path d="M 210 95 V 82"/><path d="M 230 95 V 82"/><path d="M 245 95 V 82"/>
+        </g>
+        <text x="220" y="210" text-anchor="middle" fill="var(--ink-soft)" font-size="10.5">độ lệch → thay đổi điện dung răng lược → ASIC → giá trị 16-bit</text>
+        <defs>
+          <marker id="ar1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--sig1)"/></marker>
+          <marker id="ar2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--warn)"/></marker>
+          <marker id="ar3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--sig2)"/></marker>
+        </defs>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- 3. MODULE GY-50 & WIRING -->
+<section class="card">
+  <h2>3. Module GY-50: pinout & đấu vào ESP32-C3 Super Mini</h2>
+  <p style="font-size:.92rem;">Breakout GY-50 có 8 chân, nhưng ở chế độ I²C chỉ cần đấu <b>4 chân</b>. Bus I²C dùng chung với OLED SH1106 (địa chỉ <code>0x3C</code>) — không trùng địa chỉ.</p>
+  <table>
+    <tr><th>Chân GY-50</th><th>Vai trò</th><th>Nối với C3 Super Mini</th><th>Ghi chú</th></tr>
+    <tr><td><b>VCC</b></td><td>Nguồn vào (LDO onboard)</td><td><b>3V3</b></td><td>Chịu được 5V nhờ LDO, nhưng dùng 3V3 để logic I²C đồng mức với ESP32</td></tr>
+    <tr><td><b>GND</b></td><td>Mass</td><td><b>GND</b></td><td>—</td></tr>
+    <tr><td><b>SCL</b></td><td>I²C clock</td><td><b>GPIO9</b> (silkscreen "9/SCL")</td><td>Chân có nút BOOT của board — không đè nút khi đang chạy</td></tr>
+    <tr><td><b>SDA</b></td><td>I²C data</td><td><b>GPIO8</b> (silkscreen "8/SDA")</td><td>Trùng LED xanh onboard → LED nhấp nháy theo traffic I²C (vô hại)</td></tr>
+    <tr><td>SDO</td><td>Bit thấp địa chỉ I²C</td><td>Để trống</td><td>Module kéo lên sẵn → địa chỉ <b>0x69</b>; nối GND nếu muốn 0x68</td></tr>
+    <tr><td>CS</td><td>Chọn I²C/SPI</td><td>Để trống</td><td><b>Phải ở mức CAO</b> mới chạy I²C; module đã kéo lên sẵn. Scan không thấy 0x69 → nối thẳng CS → 3V3</td></tr>
+    <tr><td>INT1</td><td>Interrupt ngưỡng</td><td>Để trống</td><td>Chỉ cần nếu sau này muốn wake-on-motion</td></tr>
+    <tr><td>INT2 (DRDY)</td><td>Data-ready / FIFO</td><td>Để trống</td><td>emocar poll qua I²C là đủ</td></tr>
+  </table>
+
+  <h3>Bus I²C hoàn chỉnh của emocar</h3>
+  <div class="diagram-container">
+    <svg viewBox="0 0 640 210" xmlns="http://www.w3.org/2000/svg" fill="none">
+      <!-- ESP32 -->
+      <rect x="20" y="45" width="150" height="130" rx="8" fill="var(--brand-light)" stroke="var(--brand)" stroke-width="2"/>
+      <text x="95" y="70" text-anchor="middle" fill="var(--ink)" font-size="12" font-weight="bold">ESP32-C3</text>
+      <text x="95" y="86" text-anchor="middle" fill="var(--ink-soft)" font-size="10.5">Super Mini</text>
+      <text x="160" y="112" text-anchor="end" fill="var(--sig1)" font-size="10.5" font-weight="bold">GPIO8 SDA</text>
+      <text x="160" y="134" text-anchor="end" fill="var(--sig2)" font-size="10.5" font-weight="bold">GPIO9 SCL</text>
+      <text x="160" y="156" text-anchor="end" fill="var(--pwr)" font-size="10.5" font-weight="bold">3V3</text>
+      <text x="160" y="170" text-anchor="end" fill="var(--gnd)" font-size="10.5" font-weight="bold">GND</text>
+      <!-- bus lines -->
+      <path d="M 170 108 H 620" stroke="var(--sig1)" stroke-width="2.5"/>
+      <path d="M 170 130 H 620" stroke="var(--sig2)" stroke-width="2.5"/>
+      <path d="M 170 152 H 620" stroke="var(--pwr)" stroke-width="2"/>
+      <path d="M 170 166 H 620" stroke="var(--gnd)" stroke-width="2"/>
+      <!-- GY-50 -->
+      <rect x="250" y="20" width="130" height="60" rx="8" fill="none" stroke="var(--ok)" stroke-width="2"/>
+      <text x="315" y="45" text-anchor="middle" fill="var(--ink)" font-size="12" font-weight="bold">GY-50 gyro</text>
+      <text x="315" y="62" text-anchor="middle" fill="var(--ink-soft)" font-size="10.5">addr 0x69</text>
+      <path d="M 290 80 V 108" stroke="var(--sig1)" stroke-width="2"/>
+      <path d="M 315 80 V 130" stroke="var(--sig2)" stroke-width="2"/>
+      <path d="M 340 80 V 152" stroke="var(--pwr)" stroke-width="1.8"/>
+      <path d="M 360 80 V 166" stroke="var(--gnd)" stroke-width="1.8"/>
+      <!-- OLED -->
+      <rect x="450" y="20" width="130" height="60" rx="8" fill="none" stroke="var(--warn)" stroke-width="2"/>
+      <text x="515" y="45" text-anchor="middle" fill="var(--ink)" font-size="12" font-weight="bold">OLED SH1106</text>
+      <text x="515" y="62" text-anchor="middle" fill="var(--ink-soft)" font-size="10.5">addr 0x3C</text>
+      <path d="M 490 80 V 108" stroke="var(--sig1)" stroke-width="2"/>
+      <path d="M 515 80 V 130" stroke="var(--sig2)" stroke-width="2"/>
+      <path d="M 540 80 V 152" stroke="var(--pwr)" stroke-width="1.8"/>
+      <path d="M 560 80 V 166" stroke="var(--gnd)" stroke-width="1.8"/>
+      <text x="620" y="102" text-anchor="end" fill="var(--sig1)" font-size="10">SDA</text>
+      <text x="620" y="126" text-anchor="end" fill="var(--sig2)" font-size="10">SCL</text>
+      <text x="325" y="196" text-anchor="middle" fill="var(--ink-soft)" font-size="10.5">Pull-up có sẵn trên cả hai module — không cần điện trở ngoài. Tổng dòng ~30 mA, chân 3V3 gánh thoải mái.</text>
+    </svg>
+  </div>
+</section>
+
+<!-- 4. THANH GHI -->
+<section class="card">
+  <h2>4. Bản đồ thanh ghi tối thiểu (I²C)</h2>
+  <p style="font-size:.92rem;">Chỉ cần nhóm thanh ghi dưới đây là chạy được emocar. Mẹo quan trọng: khi đọc nhiều byte liên tiếp, <b>set bit 7 của địa chỉ thanh ghi</b> (ví dụ <code>0x28 | 0x80</code>) để chip tự tăng địa chỉ — đọc cả 6 byte XYZ trong một transaction.</p>
+  <table>
+    <tr><th>Thanh ghi</th><th>Địa chỉ</th><th>Dùng để</th></tr>
+    <tr><td><code>WHO_AM_I</code></td><td>0x0F</td><td>Nhận diện chip — luôn trả về <b>0xD3</b>. Bước kiểm tra đầu tiên khi bring-up</td></tr>
+    <tr><td><code>CTRL_REG1</code></td><td>0x20</td><td>ODR + băng thông + bật nguồn + bật từng trục. Reset mặc định là <code>0x07</code> (power-down!) — phải ghi <code>0x0F</code> (100 Hz, normal, XYZ bật) chip mới chạy</td></tr>
+    <tr><td><code>CTRL_REG4</code></td><td>0x23</td><td>Chọn full scale: FS bits = 00→±250, 01→±500, 10/11→±2000 dps. Nên bật thêm BDU (bit 7) để 2 byte high/low không bị xé lệch nhau khi đọc</td></tr>
+    <tr><td><code>OUT_TEMP</code></td><td>0x26</td><td>Nhiệt độ tương đối 8-bit (chỉ để bù drift, không phải nhiệt kế)</td></tr>
+    <tr><td><code>STATUS_REG</code></td><td>0x27</td><td>Bit 3 (ZYXDA) = có mẫu mới; bit 7 = overrun (đọc không kịp)</td></tr>
+    <tr><td><code>OUT_X_L … OUT_Z_H</code></td><td>0x28 – 0x2D</td><td>6 byte dữ liệu: X, Y, Z mỗi trục 2 byte little-endian, signed 16-bit</td></tr>
+  </table>
+
+  <div class="formula-box">
+    <div class="formula-title">Chuyển raw → °/s</div>
+    <div class="formula-math">rate [dps] = raw × sensitivity</div>
+    <div class="formula-desc">Sensitivity theo full scale: ±250 dps → <b>8.75 mdps</b>/digit &nbsp;|&nbsp; ±500 → <b>17.50 mdps</b>/digit &nbsp;|&nbsp; ±2000 → <b>70 mdps</b>/digit. Ví dụ FS=±2000, raw = 1000 → 70 °/s.</div>
+  </div>
+
+  <h3>Zero-rate bias — thứ bắt buộc phải calibrate</h3>
+  <p style="font-size:.92rem;">Khi đứng yên hoàn toàn, gyro <b>không trả về 0</b> mà trả về một offset (zero-rate level, có thể lệch tới ±10…±75 dps tùy full scale, trôi theo nhiệt độ). Cách xử lý chuẩn: lúc khởi động, giữ xe đứng yên ~1–2 giây, lấy trung bình vài trăm mẫu mỗi trục làm <code>bias</code>, sau đó mọi phép đo đều trừ đi bias này. Không calibrate thì state <code>normal</code> sẽ không bao giờ đạt được.</p>
+</section>
+
+<!-- 5. STATE MACHINE EMOCAR -->
+<section class="card">
+  <h2>5. Suy ra 3 state của emocar từ dữ liệu gyro</h2>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <table>
+        <tr><th>State</th><th>Tín hiệu</th><th>Điều kiện gợi ý (điểm khởi đầu, sẽ calibrate thực tế)</th></tr>
+        <tr><td><b>spinning</b> 😵‍💫</td><td>Yaw rate trục Z</td><td><code>|gz − bias<sub>z</sub>|</code> &gt; ~150–200 dps, giữ liên tục ≥ 300 ms</td></tr>
+        <tr><td><b>fast</b> 😮</td><td>Độ rung (proxy)</td><td>RMS/variance của cả 3 trục trong cửa sổ ~250 ms vượt ngưỡng — xe lăn bánh càng nhanh rung càng lớn</td></tr>
+        <tr><td><b>normal</b> 🙂</td><td>Mặc định</td><td>Không thỏa hai điều kiện trên</td></tr>
+      </table>
+      <p style="font-size:.92rem; margin-top:1rem;">Nguyên tắc để emoji không "giật cục":</p>
+      <ul style="padding-left:1.2rem; font-size:.9rem; display:flex; flex-direction:column; gap:.4rem; margin-top:.4rem;">
+        <li><b>Ưu tiên:</b> spinning &gt; fast &gt; normal (xoay tròn cũng tạo rung — phải xét spinning trước).</li>
+        <li><b>Hysteresis:</b> ngưỡng vào state cao hơn ngưỡng thoát (ví dụ vào ở 200 dps, thoát ở 120 dps).</li>
+        <li><b>Hold time:</b> vào/ra state phải giữ điều kiện đủ lâu (~200–300 ms) để lọc gai nhiễu.</li>
+      </ul>
+    </div>
+    <div class="diagram-container">
+      <svg viewBox="0 0 400 250" xmlns="http://www.w3.org/2000/svg" fill="none">
+        <text x="200" y="20" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="bold">State machine hiển thị emoji</text>
+        <rect x="140" y="35" width="120" height="44" rx="22" fill="var(--brand-light)" stroke="var(--brand)" stroke-width="2"/>
+        <text x="200" y="62" text-anchor="middle" fill="var(--ink)" font-size="12" font-weight="bold">NORMAL 🙂</text>
+        <rect x="25" y="165" width="120" height="44" rx="22" fill="none" stroke="var(--warn)" stroke-width="2"/>
+        <text x="85" y="192" text-anchor="middle" fill="var(--ink)" font-size="12" font-weight="bold">FAST 😮</text>
+        <rect x="255" y="165" width="120" height="44" rx="22" fill="none" stroke="var(--sig2)" stroke-width="2"/>
+        <text x="315" y="192" text-anchor="middle" fill="var(--ink)" font-size="12" font-weight="bold">SPINNING 😵‍💫</text>
+        <path d="M 155 80 Q 100 110 88 160" stroke="var(--warn)" stroke-width="2" marker-end="url(#sa1)"/>
+        <text x="60" y="120" fill="var(--warn)" font-size="9.5">rung &gt; ngưỡng</text>
+        <path d="M 110 165 Q 150 120 178 84" stroke="var(--ink-faint)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#sa2)"/>
+        <path d="M 245 80 Q 300 110 312 160" stroke="var(--sig2)" stroke-width="2" marker-end="url(#sa3)"/>
+        <text x="288" y="120" fill="var(--sig2)" font-size="9.5">|gz| &gt; ngưỡng</text>
+        <path d="M 290 165 Q 250 120 222 84" stroke="var(--ink-faint)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#sa2)"/>
+        <path d="M 145 195 H 250" stroke="var(--sig2)" stroke-width="2" marker-end="url(#sa3)"/>
+        <text x="197" y="188" text-anchor="middle" fill="var(--sig2)" font-size="9.5">bắt đầu xoay</text>
+        <text x="200" y="240" text-anchor="middle" fill="var(--ink-soft)" font-size="10">nét đứt = quay về khi dưới ngưỡng-thoát đủ lâu (hysteresis + hold)</text>
+        <defs>
+          <marker id="sa1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--warn)"/></marker>
+          <marker id="sa2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--ink-faint)"/></marker>
+          <marker id="sa3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--sig2)"/></marker>
+        </defs>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- 6. BRING-UP CHECKLIST -->
+<section class="card">
+  <h2>6. Checklist bring-up</h2>
+  <table>
+    <tr><th>#</th><th>Bước</th><th>Kỳ vọng</th><th>Nếu sai</th></tr>
+    <tr><td>1</td><td>Quét I²C (sketch <code>i2c_scanner</code> có sẵn trong repo)</td><td>Thấy <b>0x69</b> (gyro) và <b>0x3C</b> (OLED)</td><td>Thiếu 0x69 → kiểm tra CS phải ở mức cao (nối CS → 3V3); thấy 0x68 thay vì 0x69 → SDO đang bị kéo xuống, chỉ cần đổi địa chỉ trong code</td></tr>
+    <tr><td>2</td><td>Đọc <code>WHO_AM_I</code> (0x0F)</td><td>Trả về <b>0xD3</b></td><td>Trả giá trị khác → module không phải L3G4200D thật (hàng nhái đôi khi gắn chip khác — đọc được giá trị gì thì tra chip đó)</td></tr>
+    <tr><td>3</td><td>Ghi <code>CTRL_REG1 = 0x0F</code>, <code>CTRL_REG4</code> chọn ±2000 dps + BDU</td><td>STATUS_REG có bit ZYXDA nhấp nhô</td><td>Dữ liệu toàn 0 → quên bật PD bit trong CTRL_REG1 (chip vẫn đang power-down)</td></tr>
+    <tr><td>4</td><td>Để yên trên bàn, in raw 3 trục</td><td>Giá trị nhỏ, dao động quanh một offset ổn định</td><td>Offset lớn là bình thường — đó chính là zero-rate bias cần calibrate, không phải lỗi</td></tr>
+    <tr><td>5</td><td>Xoay module quanh trục Z bằng tay</td><td>Kênh Z vọt lên rõ rệt, đúng dấu theo chiều xoay</td><td>Trục "sai" phản ứng → xem lại chiều gắn module trên xe, chọn lại trục yaw</td></tr>
+  </table>
+  <p style="font-size:.9rem; color:var(--ink-soft); margin-top:1rem;">Board facts (nguồn: espboards.dev/esp32/esp32-c3-super-mini): 4MB flash, native USB CDC, Arduino IDE chọn "ESP32C3 Dev Module", PlatformIO <code>esp32-c3-devkitm-1</code>. GPIO8/9 là strapping pin nhưng pull-up I²C đúng chiều mức boot cần — an toàn.</p>
+</section>
+
+</div>
+</body>
+</html>
