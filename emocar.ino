@@ -135,12 +135,45 @@ void setup() {
   Serial.println("Running. Columns: gx gy gz | rms pk | jitter | gz pk | roll ctx | samples/s | state");
 }
 
+// A gyro that stops delivering leaves the last state frozen on screen — a stale face is
+// worse than an error, because it looks like a feeling. Nothing in the sample data can
+// reveal this (a wedged sensor reads as perfectly still), so the only test is whether new
+// samples are arriving at all. Recovery is attempted forever rather than halting: the fault
+// is usually a jostled wire, and the car should come back by itself when it is reseated.
+static void gyroWatchdog(int n, uint32_t now) {
+  static uint32_t lastSample = 0, lastRetry = 0;
+  static bool lost = false;
+
+  if (n > 0) {
+    lastSample = now;
+    if (lost) {                                  // it came back
+      lost = false;
+      Serial.println("! gyro recovered");
+      animShow(motionGet().state);
+    }
+    return;
+  }
+  if (!lastSample) lastSample = now;             // first loop, nothing has arrived yet
+  if (!lost && now - lastSample > GYRO_TIMEOUT_MS) {
+    lost = true; lastRetry = now;
+    Serial.println("! gyro stopped delivering samples — check wiring (SDA 8 / SCL 9)");
+    animMessage("GYRO ERROR", "no data", "check wiring");
+  }
+  if (lost && now - lastRetry >= GYRO_RETRY_MS) {
+    lastRetry = now;
+    uint8_t who;
+    if (gyroBegin(who) == GYRO_OK) { gyroFifoEnable(); Serial.println("re-init ok, waiting for samples"); }
+    else Serial.printf("re-init failed (WHO_AM_I 0x%02X)\n", who);
+  }
+}
+
 void loop() {
   static uint32_t lastPrint = 0;
 
   GyroRaw fifo[21]; bool overrun;
   int n = gyroReadFifo(fifo, 21, overrun);
   if (overrun) Serial.println("! FIFO overrun — loop too slow, samples lost");
+  gyroWatchdog(n, millis());
   for (int i = 0; i < n; i++)
     if (motionUpdate(fifo[i])) {
       Serial.printf(">>> state = %s\n", carStateName(motionGet().state));

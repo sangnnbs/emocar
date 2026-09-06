@@ -480,6 +480,33 @@ recompiling); the card view is what makes it pleasant.
 - [ ] Per-state card in the web UI: fields, enable box, chart with threshold lines
 - [ ] Keep pins, profile, slots and WiFi compile-time — lockout risk
 
+### P7 — A dead sensor looks exactly like a perfectly still car
+
+Added 2026-09-06, after the bench gyro wedged **four times in one session**. Each time
+the car kept showing whichever face it had computed last — once holding 🥴 for 6.5 s,
+once holding 🥰 indefinitely while sitting untouched on a desk. That reads as a stuck
+emotion, and it sent us hunting for a state-machine bug that did not exist.
+
+Nothing in the sample *data* can reveal this. A wedged sensor has zero motion and zero
+jitter — it is, by every measure the firmware has, a perfectly still car. P4's jitter test
+cannot help: it answers "is it moving?", not "is this data new?". The only signal is the
+absence of new samples.
+
+**Solution:** a watchdog in the main loop. No samples for `GYRO_TIMEOUT_MS` (1 s) → show
+`GYRO ERROR / no data / check wiring` and retry `gyroBegin()` + `gyroFifoEnable()` every
+`GYRO_RETRY_MS` (2 s), forever. Recovery rather than `halt()` on purpose: the fault is
+usually a jostled wire, so the car should come back by itself once it is reseated, and
+say so (`! gyro recovered`). Two observed signatures, both now covered — a hard stop
+(0 sps) and a soft one (identical samples repeating while the rate collapses; the sample
+*count* still falls, because the FIFO stops filling).
+
+- [x] Watchdog: timeout → error face + periodic re-init, auto-recovery
+- [ ] Consider a rolling "distinct sample" check for a sensor that keeps *streaming*
+      identical values at full rate — not seen yet, and not worth the code until it is
+- [ ] `calibrate()` still `halt()`s if the gyro is dead *at boot*, so a reseated wire needs
+      a manual reset to be noticed. Same retry treatment would make the car self-healing
+      end to end — worth doing while the bench wiring stays this fragile
+
 ## Open questions
 
 - **Deferred states — STARTLED 😲 and SLEEP 😴.** Cut from the four-state plan

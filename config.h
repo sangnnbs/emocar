@@ -56,6 +56,14 @@
 #define REZERO_AFTER_MS  3000 // ...and after this long at rest, start correcting the bias
 #define REZERO_TAU_MS   20000 // exponential time constant of that correction (gentle on purpose)
 
+// ---------- gyro watchdog ----------
+// A wedged sensor is indistinguishable from a perfectly still car by any measure of the
+// *data* — it has zero jitter and zero motion. Only the absence of NEW samples gives it
+// away. Without this the car keeps showing whichever face it computed last, forever, which
+// reads as a stuck emotion rather than a fault. Seen four times on the bench in one session.
+#define GYRO_TIMEOUT_MS  1000   // no new samples for this long = the sensor is gone
+#define GYRO_RETRY_MS    2000   // how often to try bringing it back
+
 // ---------- animation ----------
 #define ANIM_MIN_FRAME_MS 30  // floor for a frame delay read from the .qgif (0 in file → 100)
 #define PEAK_HOLD_MS      3000 // peak readout reset period — only used by the Serial telemetry
