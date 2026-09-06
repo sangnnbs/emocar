@@ -100,6 +100,7 @@ int main() {
   printf("put back down\n");
   feed(0.3f, 0.3f, 0.3f, 2500);
   expectCtx("after 2.5 s of stillness", false);
+  feed(0.3f, 0.3f, 0.3f, 1200);           // HAPPY -> NORMAL is down the ladder: EXIT_HOLD_MS
   expect("resting on the desk", NORMAL);
 
   // --- 7. a real spin on the floor -> DIZZY, dose scales the tail ----------
@@ -121,6 +122,19 @@ int main() {
   for (int i = 0; i < 12; i++) feed(1.0f, 1.0f, i % 2 ? 60.0f : -60.0f, 100);
   printf("  %s spin path stayed closed (sign flips every 100 ms)\n", spinCond ? "FAIL" : "ok  ");
   if (spinCond) fails++;
+
+  // --- 9. fast attack, slow decay (P1) ------------------------------------
+  // The same threshold crossed in both directions must not take the same time: going up
+  // the ladder is a reaction, coming down is a feeling wearing off.
+  printf("attack vs decay across one threshold\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(6.0f, 1.5f, 3.0f, 400);            // up: NORMAL -> FAST inside ENTER_HOLD_MS
+  expect("400 ms after the motion started", FAST);
+  feed(0.5f, 0.5f, 0.5f, 600);            // down: well past ENTER_HOLD_MS...
+  expect("600 ms after the motion stopped (still decaying)", FAST);
+  feed(0.5f, 0.5f, 0.5f, 900);            // ...and past EXIT_HOLD_MS
+  expect("1.5 s after the motion stopped", NORMAL);
 
   printf("\n%s\n", fails ? "FAILURES" : "all scenarios pass");
   return fails != 0;

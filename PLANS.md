@@ -57,8 +57,16 @@ Rejected on the way here (first pass was overdesigned):
 - DIZZY paying `EXIT_HOLD_MS` on top of its own timer is *accepted* (~1 s of extra
   wooze): tune the dose constant down rather than special-case it.
 
-- [ ] `HOLD_MS` → `ENTER_HOLD_MS` / `EXIT_HOLD_MS` + priority-direction rule
-- [ ] `PRIORITY[]` map (enum order ≠ arousal order)
+**Implemented 2026-09-06.** One subtlety the plan didn't anticipate: `HOLD_MS` was doing
+two unrelated jobs — the commit hold *and* the "one sign for 200 ms" that defines a spin.
+Those are different layers (the condition layer decides what is happening, the commit
+layer decides what to show), so the spin got its own `SPIN_HOLD_MS`, matching the
+`SHAKE_HOLD_MS` that already existed. Only the commit hold became directional.
+
+- [x] `HOLD_MS` → `ENTER_HOLD_MS` (200) / `EXIT_HOLD_MS` (1000) + priority-direction rule
+- [x] `PRIORITY[]` map (enum order ≠ ladder order)
+- [x] Split the spin's condition hold out as `SPIN_HOLD_MS` — not part of the ladder
+- [ ] Confirm the decay *feels* right on the car rather than merely measuring 1 s (P5)
 
 ### P2 — Three states aren't enough to feel alive; idle looks dead
 
@@ -341,6 +349,8 @@ cable-stress test.
       bare board, so none of these numbers transfer unchanged
 - [ ] Log roll travel for bump-crossings vs pickups; place the 25° threshold between
 - [ ] Dizzy dose: is ~8 ms/deg the right feel, and is the 1–8 s clamp right?
+- [ ] `EXIT_HOLD_MS` 1000: does the decay read as "calming down" or just as lag? It is the
+      one constant whose whole purpose is *feel*, so a measurement cannot settle it
 
 
 ### P6 — A state's signal can't be changed without a reflash

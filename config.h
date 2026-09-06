@@ -70,8 +70,15 @@
 //   held in a palm, casual rms p50 35, p90 75, spikes to 255
 //   a pickup/yank burst    rms 150-380, gz pk 400-730
 // Older tinicar figures, still unconfirmed here: car rolling pk ≈ 6, car spin |gz| ≈ 60
-#define HOLD_MS          200    // a condition must persist this long before the state flips
 #define RMS_WINDOW_MS    250    // vibration RMS window
+
+// Fast attack, slow decay (P1). A startle is instant; calming down lingers. So the
+// commit hold depends on which way the state moves along the priority ladder
+// (DIZZY > HAPPY > FAST > NORMAL, see PRIORITY[] in motion.cpp): going *up* is quick,
+// coming back *down* is slow, which is what keeps a big reaction from snapping off
+// as if nothing had happened. These gate the state flip, not the conditions below.
+#define ENTER_HOLD_MS    200    // moving up the ladder: a reaction should feel immediate
+#define EXIT_HOLD_MS    1000    // moving down: the feeling decays instead of cutting
 
 // FAST — floor state: the car is being pushed/driven hard. Suppressed while in hand.
 #define FAST_ENTER_RMS   4.0f   // vibration RMS (dps) to enter FAST
@@ -80,7 +87,7 @@
 // DIZZY — two entry paths into one state: a real spin, or a hard hand shake.
 // A spin keeps one sign; a shake flips sign constantly, which is why the shake path
 // keys on sheer magnitude instead (shaking by hand is more violent than driving).
-#define SPIN_ENTER_DPS  40.0f   // |gz| to enter the spin path (one sign held for HOLD_MS)
+#define SPIN_ENTER_DPS  40.0f   // |gz| to enter the spin path (one sign held for SPIN_HOLD_MS)
 #define SPIN_EXIT_DPS   25.0f   // |gz| below which the spin ends (a sign flip does not)
 // The bar to clear is ordinary handling, not FAST. Measured: just holding the board
 // and turning it over runs rms p50 35 / p90 75, so 45 sat near the *median* of casual
@@ -88,6 +95,7 @@
 // it has to be a deliberate shake. Re-measure on the car; a car is heavier and damper.
 #define SHAKE_ENTER_RMS 120.0f  // RMS to enter the shake path
 #define SHAKE_EXIT_RMS   80.0f  // RMS below which the shake ends
+#define SPIN_HOLD_MS     200    // spin must hold one sign this long (rejects hand shake)
 #define SHAKE_HOLD_MS    300    // shake must persist this long (rejects a single jolt)
 
 // DIZZY aftermath — dose = Σ|g|·dt over the spin/shake, in degrees of total rotation.

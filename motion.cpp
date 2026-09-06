@@ -20,6 +20,13 @@
 static const char *NAMES[] = { "NORMAL", "FAST", "DIZZY", "HAPPY" };
 const char *carStateName(CarState s) { return NAMES[s]; }
 
+// Where each state sits on the ladder: DIZZY > HAPPY > FAST > NORMAL. Separate from the
+// enum, because the enum is *slot order* and must stay append-only — HAPPY is slot 3 yet
+// outranks FAST at slot 1. Not strictly an arousal ladder either: HAPPY over FAST is two
+// mutually exclusive situations, where the more specific claim ("a hand is holding me")
+// wins. Used only to decide whether a transition is going up or coming down.
+static const uint8_t PRIORITY[] = { 0, 1, 3, 2 };   // NORMAL, FAST, DIZZY, HAPPY
+
 static const float SAMPLE_S = SAMPLE_US / 1000000.0f;
 
 static Motion  m;
@@ -58,7 +65,7 @@ void motionTick() {
 }
 
 // A real spin holds one direction; a hand shake reverses every ~100 ms, which restarts
-// the timer and never reaches HOLD_MS. Leaving takes slowing down, not a sign flip —
+// the timer and never reaches SPIN_HOLD_MS. Leaving takes slowing down, not a sign flip —
 // otherwise every wobble mid-spin would end the state.
 static void updateSpin(uint32_t now) {
   float az  = fabsf(m.gz);
@@ -68,7 +75,7 @@ static void updateSpin(uint32_t now) {
     return;
   }
   if (az < SPIN_ENTER_DPS || dir != spinDir) { spinDir = dir; spinSince = now; return; }
-  if (now - spinSince >= HOLD_MS) spinCond = true;
+  if (now - spinSince >= SPIN_HOLD_MS) spinCond = true;
 }
 
 // The shake path ignores direction entirely and keys on sheer magnitude: no reversal
@@ -137,7 +144,9 @@ static bool updateState(uint32_t now, float mag) {
                 :                                    NORMAL;
 
   if (want != candidate) { candidate = want; condSince = now; }
-  if (candidate != m.state && now - condSince >= HOLD_MS) { m.state = candidate; return true; }
+  if (candidate == m.state) return false;
+  uint32_t hold = PRIORITY[candidate] > PRIORITY[m.state] ? ENTER_HOLD_MS : EXIT_HOLD_MS;
+  if (now - condSince >= hold) { m.state = candidate; return true; }
   return false;
 }
 
