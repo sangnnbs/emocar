@@ -102,8 +102,15 @@
 // avoid being tripped by handling. That is the whole reason the shake path is gone: it
 // keyed on RMS magnitude, which handling and shaking share, and no value ever separated
 // them (spec'd 8, then 45, then 120, never confirmed).
-#define FAST_ENTER_RMS   4.0f   // vibration RMS (dps) to enter FAST
-#define FAST_EXIT_RMS    2.5f   // vibration RMS below which FAST is left
+// Lowered 4.0 -> 2.5 once the context bit took over: the old value had to sit above a
+// hand, and no longer does, because FAST cannot fire while the car is held at all. What
+// it must now clear is only the resting noise floor, measured at 0.5-0.6 on every surface
+// (it is the sensor, not the surface). The headroom buys soft surfaces: a bed, a sofa or
+// a carpet damps most of the rattle a table transmits, and at 4.0 a car pushed across one
+// would never have reached FAST. Remaining false positive: a surface that vibrates by
+// itself. Per-surface adjustment without a reflash is P6.
+#define FAST_ENTER_RMS   2.5f   // vibration RMS (dps) to enter FAST
+#define FAST_EXIT_RMS    1.5f   // vibration RMS below which FAST is left
 
 // DIZZY — a real spin on the floor. One sign held, which a wobble or a bump cannot fake.
 #define SPIN_ENTER_DPS  40.0f   // |gz| to enter the spin (one sign held for SPIN_HOLD_MS)

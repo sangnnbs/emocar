@@ -109,9 +109,9 @@ int main() {
   feed(0.5f, 0.5f, 0.5f, 1000);
   feed(2.0f, 1.0f, 120.0f, 3000);         // one sign, 120 dps = 360 deg spun
   expect("spinning", DIZZY);
-  feed(1.0f, 1.0f, 1.0f, 1500);
+  feed(0.5f, 0.5f, 0.5f, 1500);           // measured rest is 0.5-0.6 per axis
   expect("1.5 s after the spin (dose ~360 deg -> ~2.9 s)", DIZZY);
-  feed(1.0f, 1.0f, 1.0f, 3000);
+  feed(0.5f, 0.5f, 0.5f, 3000);
   expect("after the tail is spent", NORMAL);
   expectCtx("a floor spin must not read as a pickup", false);
 
@@ -120,7 +120,7 @@ int main() {
   reset();
   feed(0.5f, 0.5f, 0.5f, 1000);
   feed(2.0f, 1.0f, 120.0f, 3000);         // spin, arming a long tail
-  feed(1.0f, 1.0f, 1.0f, 500);
+  feed(0.5f, 0.5f, 0.5f, 500);
   expect("wooze running", DIZZY);
   feed(4.0f, 30.0f, 4.0f, 1200);          // lifted off the floor
   expect("in a hand now, wooze or not", HAPPY);

@@ -88,7 +88,7 @@ so slow constant turning can never read as still):
 | # | State | Axes | Enter | Exit |
 |---|---|---|---|---|
 | 0 | NORMAL 🙂 | — | default (placeholder already blinks) | — |
-| 1 | FAST 😮 | RMS (X+Y+Z) | RMS > 4.0 for 200 ms — real speed later (P3) | RMS < 2.5 for 1 s |
+| 1 | FAST 😮 | RMS (X+Y+Z) | RMS > 2.5 for 200 ms — real speed later (P3) | RMS < 1.5 for 1 s |
 | 2 | DIZZY 🥴 | Z, floor only | \|gz\| > 40 holding *one sign* for 200 ms — arms the dose accumulator | \|gz\| < 25 **and** dose timer expired: ~8 ms/deg of spin, clamp 1–8 s (spin longer → dizzier, which invites play) |
 | 3 | HAPPY 🥰 | context bit | `ctxHand` is set — see below. No threshold of its own | `ctxHand` clears |
 
@@ -223,6 +223,30 @@ After the fix, 32 s of continuous handling held HAPPY throughout.
 - [x] Stop at four — more states = overlapping triggers and muddier emotions
 
 ### P3 — FAST is a vibration proxy, not actual speed (parked)
+
+**Surface independence, 2026-09-06.** Requirement added: the floor states must behave the
+same on any surface — floor, table, bed, sofa. Two of the three already do, and the split
+is exactly whether a state reads *rotation* or *vibration*:
+
+| State | Keys on | Same on every surface? |
+|---|---|---|
+| NORMAL | default | yes |
+| DIZZY | \|gz\| rotation rate | yes — a spin is a spin |
+| context bit | roll travel | yes — a lift is a lift |
+| FAST | vibration RMS | **no** |
+
+Rotation is a direct measurement of what the car is doing. Vibration is a property of the
+*surface* as much as the car: a bed or sofa damps nearly everything a table transmits, so
+one threshold cannot mean the same thing on both. This is the same defect P3 already
+names, seen from a new angle — and it is why the accelerometer would help here too, since
+linear acceleration from a push is a property of the car, not the surface it rolls on.
+
+Partial fix taken now, made possible by the shake removal: `FAST_ENTER_RMS` dropped 4.0 →
+2.5 (exit 2.5 → 1.5). The old value had to sit above a hand; it no longer does, because
+FAST cannot fire while the car is held at all. All it must clear now is the resting noise
+floor, which is 0.5–0.6 on every surface because it is the *sensor's* noise, not the
+surface's. That headroom is what buys soft surfaces. Remaining false positive: a surface
+that vibrates on its own. Per-surface adjustment without a reflash is P6.
 
 FAST is meant to be "going fast", but vibration RMS conflates speed with
 roughness — a hand shake triggers it. The fix is real speed, and the plan was to
