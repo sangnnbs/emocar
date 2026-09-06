@@ -11,3 +11,6 @@ downloads/
 gifs/
 
 .DS_Store
+
+# host test binary
+test/motion_test
