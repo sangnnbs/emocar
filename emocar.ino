@@ -2,13 +2,13 @@
  * emocar — a face on the car that reacts to how it moves.
  * ESP32-C3 Super Mini + L3G4200D (GY-50) gyro + SH1106 128x64 OLED, one I2C bus.
  *
- *   NORMAL 🙂  default
- *   FAST   😮  3-axis vibration RMS above FAST_ENTER_RMS — floor only
- *   DIZZY  🥴  a spin (|gz| one sign) or a hard shake (RMS), plus the wooze it earned
- *   HAPPY  🥰  someone picked the car up — the context bit, not a threshold
- *   Priority DIZZY > HAPPY > FAST > NORMAL, hysteresis + hold time — see config.h.
- *   FAST and HAPPY are separated by situation, not magnitude: a hand and a push across
- *   a desk shake the gyro about equally, so a context bit decides which one applies.
+ *   In a hand:   HAPPY 🥰 — always. Being held is the answer; nothing overrides it.
+ *   On a surface: NORMAL 🙂 default
+ *                 FAST   😮 3-axis vibration RMS above FAST_ENTER_RMS
+ *                 DIZZY  🥴 a spin (|gz| holding one sign) + wooze ∝ degrees spun
+ *   A context bit decides which of those two worlds applies, from roll travel a car on
+ *   wheels cannot produce. Deciding the situation first is what makes the thresholds
+ *   tractable: FAST and DIZZY only ever have to describe a car on a surface.
  *
  * Files:
  *   config.h     every pin, address, rate and threshold — edit here only

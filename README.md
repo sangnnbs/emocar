@@ -89,7 +89,8 @@ make -C test test        # compiles motion.cpp with a stub Arduino.h and asserts
 ```
 
 Scenarios cover the four states and the floor/hand context bit: pushed on the floor must
-not read as held, a pickup must reach HAPPY, a shake must reach DIZZY and leave a tail
-proportional to the rotation, and a hand shake in yaw must not be mistaken for a spin.
+not read as held, a pickup must reach HAPPY and stay there however violently it is then
+handled, a floor spin must reach DIZZY and leave a tail proportional to the degrees spun,
+and a hand shake in yaw must not be mistaken for a spin.
 The blind spot is the magnitudes — a scenario is only as honest as the numbers fed into
 it, so thresholds still have to be confirmed on real hardware (PLANS.md P5).

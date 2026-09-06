@@ -89,15 +89,20 @@ so slow constant turning can never read as still):
 |---|---|---|---|---|
 | 0 | NORMAL 🙂 | — | default (placeholder already blinks) | — |
 | 1 | FAST 😮 | RMS (X+Y+Z) | RMS > 4.0 for 200 ms — real speed later (P3) | RMS < 2.5 for 1 s |
-| 2 | DIZZY 🥴 | Z (spin) or RMS (shake) | **spin:** \|gz\| > 40, *one sign*, 200 ms · **shake:** RMS > ~45 for 300 ms — either arms the dose accumulator | drops below **and** dose timer expired: ~8 ms/deg, clamp 1–8 s (longer/harder → dizzier — invites play) |
+| 2 | DIZZY 🥴 | Z, floor only | \|gz\| > 40 holding *one sign* for 200 ms — arms the dose accumulator | \|gz\| < 25 **and** dose timer expired: ~8 ms/deg of spin, clamp 1–8 s (spin longer → dizzier, which invites play) |
 | 3 | HAPPY 🥰 | context bit | `ctxHand` is set — see below. No threshold of its own | `ctxHand` clears |
 
-DIZZY is one state doing three jobs: the spin face, the shake face, and the
-aftermath. Two entry paths, one exit — both feed the same `|g|·dt` dose, so a
-long spin and a hard shake both leave the car woozy for as long as they earned.
-The shake path is deliberately a *single extra threshold* on the RMS that already
-exists (no reversal counting, no per-axis logic): shaking a car by hand is simply
-more violent than driving it. There is no separate SPINNING slot.
+DIZZY is the spin face and its aftermath: `|gz|·dt` accumulates while the car spins and
+is spent as screen time when it stops, so a longer spin leaves it woozy for longer.
+There is no separate SPINNING slot.
+
+**The shake path was removed 2026-09-06** after three attempts to place its threshold
+(8 → 45 → 120) and no confirmation of any of them. The reason it could not be made to
+work is structural, not a matter of tuning: shaking the car and *handling* the car are
+the same signal. Every threshold that was high enough to ignore an ordinary pickup was
+one nobody could demonstrate a shake reaching, and the connector failed whenever we
+tried. Since being held now answers the question by itself (below), the gesture that
+needed it no longer exists.
 
 ⚠️ **Corrected twice, 2026-09-06.** The threshold was specified as "~8, well above
 FAST's 4.0" — the wrong bar entirely. RMS includes *steady* rotation, so the number
@@ -117,14 +122,18 @@ RMS 70 stays 🥰. That a deliberate shake clears 120 is inferred from the picku
 burst, not yet demonstrated — the USB connector on the bare board is fragile and
 shaking it tethered drops the port.
 
-**The context bit (decided 2026-09-06).** FAST is a floor state, HAPPY is a hand
-state, and they must never be able to fire in each other's situation. Rather than
-give each one a cleverer threshold, one bit decides the *situation* and gates both:
+**The context bit (decided 2026-09-06, simplified the same day).** One bit decides the
+*situation* before any threshold is consulted, and it now partitions the states
+completely — in a hand the car is simply happy, and nothing overrides that:
 
 ```
-ctxHand = false ──▶ NORMAL 🙂 / FAST 😮 / DIZZY 🥴 (spin)
-ctxHand = true  ──▶ HAPPY 🥰            / DIZZY 🥴 (shake)
+ctxHand = false ──▶ NORMAL 🙂 / FAST 😮 / DIZZY 🥴
+ctxHand = true  ──▶ HAPPY 🥰
 ```
+
+This is what makes the remaining thresholds tractable. FAST and DIZZY only ever have to
+describe *a car on a surface*, so neither has to be chosen to also avoid being tripped
+by a hand — which is the trade that defeated the shake threshold three times.
 
 Gyro-only, the car can't feel gravity, so the bit is detected from **roll** — and
 asymmetrically, because the two edges have different best signals:
@@ -151,13 +160,12 @@ Honest failure modes, all accepted:
 - The **desk itself tilts** → false hand. Not worth defending against.
 - `stillRms` (P4) becomes load-bearing: it now decides put-down, not just idle.
 
-Display priority: **DIZZY > HAPPY > FAST > NORMAL**.
+Display priority: **HAPPY > DIZZY > FAST > NORMAL**.
 
-HAPPY sits above FAST because the context bit makes them mutually exclusive
-anyway — in a hand, FAST must never win. The order is what enforces "FAST is a
-floor state" with no extra code: `ctxHand` short-circuits the chain before
-`fastCond` is ever consulted. DIZZY stays on top of both because shaking and
-spinning are unambiguous in either situation.
+HAPPY on top is not a claim about intensity — it is the car reporting *where it is*,
+which outranks anything it might say about how it is moving. It also enforces "FAST and
+DIZZY are floor states" with no extra code: `ctxHand` short-circuits the chain before
+either is consulted.
 
 This also retires two bugs the earlier RMS-band design carried: pushing the car
 across a desk could read 🥰 (same RMS as a hand), and waving a held car briskly
@@ -170,10 +178,10 @@ layer* (NORMAL/FAST/spin condition); DIZZY's tail is **one timestamp folded into
 the existing `want` chain** — no separate overlay machine:
 
 ```
-want = spinCond || shakeCond ? DIZZY   // one-sign yaw, or RMS > ~45
-     : now < dizzyUntil      ? DIZZY   // aftermath, ∝ dose
-     : ctxHand               ? HAPPY   // context bit, no threshold of its own
-     : fastCond              ? FAST    // floor only — ctxHand short-circuits it
+want = ctxHand          ? HAPPY   // in a hand: that is the whole answer
+     : spinCond         ? DIZZY   // one-sign yaw
+     : now < dizzyUntil ? DIZZY   // aftermath, ∝ degrees spun
+     : fastCond         ? FAST
      : NORMAL;
 ```
 
@@ -207,7 +215,7 @@ HAPPY was unreachable. Two changes fixed it, both measured rather than guessed:
 After the fix, 32 s of continuous handling held HAPPY throughout.
 
 - [x] Rename SPINNING → DIZZY (slot 2) + dose accumulator and `dizzyUntil`
-- [x] DIZZY second entry path: `shakeCond` (RMS > SHAKE_ENTER_RMS for 300 ms)
+- [x] ~~DIZZY second entry path: `shakeCond`~~ — **removed 2026-09-06**, unplaceable threshold
 - [x] `ctxHand` bit: roll accumulator (enter ~25°/2 s) + still-timer (leave ~2 s), sticky
 - [x] Add HAPPY (slot 3): gated purely on `ctxHand`, no threshold of its own
 - [x] mkanim.py: dizzy (renamed spin face) + happy placeholder face, count-driven output

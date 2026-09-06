@@ -1,17 +1,19 @@
 // motion.cpp — vibration RMS + the four-state machine (PLANS.md P2).
 //
-// Three condition flags feed one want-chain. Each condition owns its own hysteresis
+// Two condition flags feed one want-chain. Each condition owns its own hysteresis
 // so the chain itself stays a straight priority list:
 //
-//   want = spin || shake  -> DIZZY     violent rotation, either kind
-//        : dizzyUntil     -> DIZZY     the wooze it earned afterwards
-//        : handCtx        -> HAPPY     someone is holding the car
-//        : fast           -> FAST      floor only: handCtx short-circuits this
-//        :                   NORMAL
+//   want = handCtx     -> HAPPY      in a hand: nothing else applies
+//        : spin        -> DIZZY      a real spin on the floor
+//        : dizzyUntil  -> DIZZY      the wooze it earned afterwards
+//        : fast        -> FAST
+//        :                NORMAL
 //
-// The context bit is what keeps FAST a floor state and HAPPY a hand state: they are
-// two situations, not two magnitudes, so no threshold can separate them (pushing a
-// car across a desk and holding it shake the gyro about equally hard).
+// The context bit decides the *situation* before any threshold is consulted, and being
+// held is the whole answer: while in a hand the car is simply happy. That is what makes
+// the remaining thresholds tractable — FAST and DIZZY only ever have to describe a car on
+// a surface, so neither has to be chosen to avoid being tripped by handling. Separating
+// handling from shaking by magnitude is what could never be made to work.
 #include <Arduino.h>
 #include <math.h>
 #include "config.h"
@@ -20,12 +22,14 @@
 static const char *NAMES[] = { "NORMAL", "FAST", "DIZZY", "HAPPY" };
 const char *carStateName(CarState s) { return NAMES[s]; }
 
-// Where each state sits on the ladder: DIZZY > HAPPY > FAST > NORMAL. Separate from the
-// enum, because the enum is *slot order* and must stay append-only — HAPPY is slot 3 yet
-// outranks FAST at slot 1. Not strictly an arousal ladder either: HAPPY over FAST is two
-// mutually exclusive situations, where the more specific claim ("a hand is holding me")
-// wins. Used only to decide whether a transition is going up or coming down.
-static const uint8_t PRIORITY[] = { 0, 1, 3, 2 };   // NORMAL, FAST, DIZZY, HAPPY
+// Where each state sits on the ladder: HAPPY > DIZZY > FAST > NORMAL. Kept separate from
+// the enum because the enum is *slot order* and must stay append-only. HAPPY is on top
+// because it is not an intensity at all — it is the car reporting *where it is*, and that
+// outranks anything it might otherwise say about how it is moving.
+// Currently identical to the enum order, which is a coincidence worth keeping the map
+// for: slots are append-only, so the next state added (STARTLED, say) would sit above
+// FAST at slot 4 and break the coincidence immediately.
+static const uint8_t PRIORITY[] = { 0, 1, 2, 3 };   // NORMAL, FAST, DIZZY, HAPPY
 
 static const float SAMPLE_S = SAMPLE_US / 1000000.0f;
 
@@ -38,12 +42,12 @@ static uint32_t restSince;              // how long jitter has been at rest leve
 static uint32_t peakSince, rateSince, sampleCount;
 static CarState candidate; static uint32_t condSince;
 
-static bool     spinCond, shakeCond, fastCond;
-static int      spinDir; static uint32_t spinSince, shakeSince;
-static float    dose;                     // Σ|g|·dt while spinning/shaking, degrees
-static uint32_t dizzyUntil;               // wooze deadline armed when that stops
+static bool     spinCond, fastCond;
+static int      spinDir; static uint32_t spinSince;
+static float    dose;                     // Σ|gz|·dt while spinning, i.e. degrees spun
+static uint32_t dizzyUntil;               // wooze deadline armed when the spin stops
 static uint32_t rollSince, stillSince, quietSince;   // context-bit windows
-static bool     doseActive;               // spin/shake was running on the last sample
+static bool     doseActive;               // the spin was running on the last sample
 
 void motionSetBias(float bx, float by, float bz) { biasX = bx; biasY = by; biasZ = bz; }
 void motionGetBias(float &bx, float &by, float &bz) { bx = biasX; by = biasY; bz = biasZ; }
@@ -55,8 +59,8 @@ void motionReset() {
   peakSince = rateSince = condSince = rollSince = stillSince = quietSince = millis();
   restSince = millis();
   candidate = NORMAL;
-  spinCond = shakeCond = fastCond = false;
-  spinDir = 0; spinSince = shakeSince = millis();
+  spinCond = fastCond = false;
+  spinDir = 0; spinSince = millis();
   dose = 0; dizzyUntil = millis(); doseActive = false;
 }
 
@@ -69,9 +73,8 @@ void motionTick() {
   }
 }
 
-// A real spin holds one direction; a hand shake reverses every ~100 ms, which restarts
-// the timer and never reaches SPIN_HOLD_MS. Leaving takes slowing down, not a sign flip —
-// otherwise every wobble mid-spin would end the state.
+// A real spin holds one direction, which a wobble or a bump cannot fake. Leaving takes
+// slowing down, not a sign flip — otherwise every wobble mid-spin would end the state.
 static void updateSpin(uint32_t now) {
   float az  = fabsf(m.gz);
   int   dir = (m.gz > 0) - (m.gz < 0);
@@ -81,17 +84,6 @@ static void updateSpin(uint32_t now) {
   }
   if (az < SPIN_ENTER_DPS || dir != spinDir) { spinDir = dir; spinSince = now; return; }
   if (now - spinSince >= SPIN_HOLD_MS) spinCond = true;
-}
-
-// The shake path ignores direction entirely and keys on sheer magnitude: no reversal
-// counting, no per-axis logic. SHAKE_HOLD_MS is what separates a shake from one jolt.
-static void updateShake(uint32_t now) {
-  if (shakeCond) {
-    if (m.rms < SHAKE_EXIT_RMS) shakeCond = false;
-    return;
-  }
-  if (m.rms < SHAKE_ENTER_RMS) { shakeSince = now; return; }
-  if (now - shakeSince >= SHAKE_HOLD_MS) shakeCond = true;
 }
 
 // Floor -> hand on roll travel, hand -> floor on stillness. Sticky on purpose: holding
@@ -119,12 +111,12 @@ static void updateContext(uint32_t now) {
   }
 }
 
-// Dose is the whole aftermath mechanism: accumulate rotation while it is happening,
-// spend it as screen time when it stops. Spin longer or shake harder -> dizzier.
-static void updateDizzyDose(uint32_t now, float mag) {
-  bool active = spinCond || shakeCond;
+// Dose is the whole aftermath mechanism: accumulate the rotation while it is happening,
+// spend it as screen time when it stops. Spin longer or faster -> dizzier for longer.
+static void updateDizzyDose(uint32_t now) {
+  bool active = spinCond;
   if (active) {
-    dose += mag * SAMPLE_S;
+    dose += fabsf(m.gz) * SAMPLE_S;       // degrees actually spun
   } else if (doseActive) {
     uint32_t ms = (uint32_t)(dose * DIZZY_MS_PER_DEG);
     if (ms < DIZZY_MIN_MS) ms = DIZZY_MIN_MS;
@@ -135,16 +127,15 @@ static void updateDizzyDose(uint32_t now, float mag) {
   doseActive = active;
 }
 
-static bool updateState(uint32_t now, float mag) {
+static bool updateState(uint32_t now) {
   updateSpin(now);
-  updateShake(now);
   updateContext(now);
-  updateDizzyDose(now, mag);
+  updateDizzyDose(now);
   fastCond = fastCond ? (m.rms > FAST_EXIT_RMS) : (m.rms > FAST_ENTER_RMS);
 
-  CarState want = (spinCond || shakeCond)          ? DIZZY
-                : (int32_t)(now - dizzyUntil) < 0  ? DIZZY
-                : m.handCtx                        ? HAPPY
+  CarState want = m.handCtx                        ? HAPPY   // in a hand: that is the answer
+                : spinCond                         ? DIZZY
+                : (int32_t)(now - dizzyUntil) < 0  ? DIZZY   // aftermath, ∝ degrees spun
                 : fastCond                         ? FAST
                 :                                    NORMAL;
 
@@ -194,5 +185,5 @@ bool motionUpdate(const GyroRaw &raw) {
   if (m.rms > m.rmsPeak)      m.rmsPeak = m.rms;
   if (fabsf(m.gz) > m.gzPeak) m.gzPeak  = fabsf(m.gz);
 
-  return updateState(now, sqrtf(sq));
+  return updateState(now);
 }

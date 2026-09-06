@@ -86,15 +86,15 @@ int main() {
   expect("brisk waving in hand", HAPPY);
   expectCtx("context while waving", true);
 
-  // --- 5. shaken hard -> DIZZY, with a tail after it stops -----------------
-  printf("shaken hard, then held still-ish\n");
-  feed(120.0f, 100.0f, 80.0f, 1500);      // RMS ~175: measured casual handling spikes to 255,
-                                          // so a deliberate shake has to clear that band
-  expect("shaking", DIZZY);
+  // --- 5. nothing interrupts HAPPY while the car is held -------------------
+  // In a hand the car is simply happy: no magnitude, however violent, changes that. This
+  // is what deleted the shake path — handling and shaking overlap on every RMS threshold
+  // that was tried (8, then 45, then 120), and none of them ever separated the two.
+  printf("shaken hard while held\n");
+  feed(120.0f, 100.0f, 80.0f, 1500);      // far above anything the old shake path wanted
+  expect("violent shaking, still in a hand", HAPPY);
   feed(2.0f, 2.0f, 2.0f, 1000);
-  expect("1 s after the shake stopped (tail)", DIZZY);
-  feed(2.0f, 2.0f, 2.0f, 8000);
-  expect("8 s later, tail spent", HAPPY);
+  expect("and afterwards", HAPPY);
 
   // --- 6. put back down -> context clears ---------------------------------
   printf("put back down\n");
@@ -115,6 +115,16 @@ int main() {
   expect("after the tail is spent", NORMAL);
   expectCtx("a floor spin must not read as a pickup", false);
 
+  // --- 7b. picked up mid-wooze: being held outranks the aftermath ----------
+  printf("picked up while still dizzy\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(2.0f, 1.0f, 120.0f, 3000);         // spin, arming a long tail
+  feed(1.0f, 1.0f, 1.0f, 500);
+  expect("wooze running", DIZZY);
+  feed(4.0f, 30.0f, 4.0f, 1200);          // lifted off the floor
+  expect("in a hand now, wooze or not", HAPPY);
+
   // --- 8. hand shake must not be read as a spin ---------------------------
   printf("hand shake in yaw must not enter the spin path\n");
   reset();
@@ -122,6 +132,7 @@ int main() {
   for (int i = 0; i < 12; i++) feed(1.0f, 1.0f, i % 2 ? 60.0f : -60.0f, 100);
   printf("  %s spin path stayed closed (sign flips every 100 ms)\n", spinCond ? "FAIL" : "ok  ");
   if (spinCond) fails++;
+  expect("a shaken car on the floor is not dizzy, just busy", FAST);
 
   // --- 9. fast attack, slow decay (P1) ------------------------------------
   // The same threshold crossed in both directions must not take the same time: going up

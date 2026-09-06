@@ -97,26 +97,21 @@
 #define ENTER_HOLD_MS    200    // moving up the ladder: a reaction should feel immediate
 #define EXIT_HOLD_MS    1000    // moving down: the feeling decays instead of cutting
 
-// FAST — floor state: the car is being pushed/driven hard. Suppressed while in hand.
+// FAST and DIZZY are *floor* states. Neither can fire while the car is in a hand — the
+// context bit decides the situation first, so no threshold below has to be chosen to
+// avoid being tripped by handling. That is the whole reason the shake path is gone: it
+// keyed on RMS magnitude, which handling and shaking share, and no value ever separated
+// them (spec'd 8, then 45, then 120, never confirmed).
 #define FAST_ENTER_RMS   4.0f   // vibration RMS (dps) to enter FAST
 #define FAST_EXIT_RMS    2.5f   // vibration RMS below which FAST is left
 
-// DIZZY — two entry paths into one state: a real spin, or a hard hand shake.
-// A spin keeps one sign; a shake flips sign constantly, which is why the shake path
-// keys on sheer magnitude instead (shaking by hand is more violent than driving).
-#define SPIN_ENTER_DPS  40.0f   // |gz| to enter the spin path (one sign held for SPIN_HOLD_MS)
+// DIZZY — a real spin on the floor. One sign held, which a wobble or a bump cannot fake.
+#define SPIN_ENTER_DPS  40.0f   // |gz| to enter the spin (one sign held for SPIN_HOLD_MS)
 #define SPIN_EXIT_DPS   25.0f   // |gz| below which the spin ends (a sign flip does not)
-// The bar to clear is ordinary handling, not FAST. Measured: just holding the board
-// and turning it over runs rms p50 35 / p90 75, so 45 sat near the *median* of casual
-// handling and everything became 🥴. 120 puts 🥴 above anything a calm hand produces —
-// it has to be a deliberate shake. Re-measure on the car; a car is heavier and damper.
-#define SHAKE_ENTER_RMS 120.0f  // RMS to enter the shake path
-#define SHAKE_EXIT_RMS   80.0f  // RMS below which the shake ends
-#define SPIN_HOLD_MS     200    // spin must hold one sign this long (rejects hand shake)
-#define SHAKE_HOLD_MS    300    // shake must persist this long (rejects a single jolt)
+#define SPIN_HOLD_MS     200    // spin must hold one sign this long
 
-// DIZZY aftermath — dose = Σ|g|·dt over the spin/shake, in degrees of total rotation.
-// Spin longer or shake harder → dizzier for longer.
+// DIZZY aftermath — dose = Σ|gz|·dt over the spin, i.e. degrees actually spun.
+// Spin longer or faster → dizzier for longer.
 #define DIZZY_MS_PER_DEG 8.0f   // wooze duration per degree accumulated
 #define DIZZY_MIN_MS     1000   // ...clamped: a flick still earns a moment of 🥴
 #define DIZZY_MAX_MS     8000   // ...and a long spin can't lock the face up
