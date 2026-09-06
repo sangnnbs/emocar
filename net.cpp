@@ -51,14 +51,14 @@ static void reply(WiFiClient &c, int code, const char *text, const char *body) {
 // ---- handlers ----
 
 static void handleStatus(WiFiClient &c) {
-  char body[420];
+  char body[560];   // header + one object per CarState
   int len = snprintf(body, sizeof body,
                      "{\"state\":\"%s\",\"heap\":%lu,\"uptime\":%lu,"
                      "\"profile\":\"%s\",\"w\":%d,\"h\":%d,\"format\":\"%s\",\"slots\":[",
                      carStateName(motionGet().state),
                      (unsigned long)ESP.getFreeHeap(), (unsigned long)(millis() / 1000),
                      DISP_PROFILE, DISP_W, DISP_H, dispFormatName());
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < CAR_STATE_COUNT; i++) {
     uint16_t frames; uint32_t bytes;
     bool file = animSlotInfo(i, frames, bytes);
     len += snprintf(body + len, sizeof body - len, "%s{\"file\":%s,\"frames\":%u,\"bytes\":%lu}",
@@ -160,7 +160,7 @@ static void handleClient(WiFiClient &c) {
     if (!strncasecmp(line, "Content-Length:", 15)) contentLen = atol(line + 15);
 
   int slot = -1;
-  if (!strncmp(path, "/anim/", 6) && path[6] >= '0' && path[6] <= '2' && !path[7])
+  if (!strncmp(path, "/anim/", 6) && path[6] >= '0' && path[6] < '0' + CAR_STATE_COUNT && !path[7])
     slot = path[6] - '0';
 
   bool wasMessage = false;

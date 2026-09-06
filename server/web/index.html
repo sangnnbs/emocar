@@ -21,7 +21,7 @@
          background: var(--bad); margin-right: 6px; }
   #dot.on { background: var(--ok); }
 
-  .states { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; }
   .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
           padding: 12px; cursor: pointer; text-align: center; }
   .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -128,16 +128,19 @@
 
 <script>
 'use strict';
+// Index = enum CarState in the firmware. Append only, never reorder: the car stores
+// animations by slot number, so reordering would silently repoint every uploaded face.
 const STATES = [
-  { name: 'NORMAL',   emoji: '\u{1F642}' },
-  { name: 'FAST',     emoji: '\u{1F62E}' },
-  { name: 'SPINNING', emoji: '\u{1F635}' },
+  { name: 'NORMAL', emoji: '\u{1F642}' },
+  { name: 'FAST',   emoji: '\u{1F62E}' },
+  { name: 'DIZZY',  emoji: '\u{1F974}' },
+  { name: 'HAPPY',  emoji: '\u{1F970}' },
 ];
 const $ = id => document.getElementById(id);
 let selState = 0;          // state targeted by the next assignment
 let tuneName = null, tuneKind = null;
 let panX = 0, panY = 0;    // panel-pixel pan of the zoomed image (drag on the preview)
-let ASSIGN = [null, null, null];   // per state: {name,frames,bytes} the server last pushed
+let ASSIGN = STATES.map(() => null);   // per state: {name,frames,bytes} the server last pushed
 
 // One gif per state, visibly: names on the cards, badges in the library.
 async function loadAssignments() {

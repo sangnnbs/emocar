@@ -41,7 +41,11 @@ type assignRec struct {
 	Bytes  int    `json:"bytes"`
 }
 
-var assignments [3]*assignRec
+// numStates must match enum CarState in the firmware's motion.h: NORMAL, FAST,
+// DIZZY, HAPPY. Slots are addressed by index, so states are append-only.
+const numStates = 4
+
+var assignments [numStates]*assignRec
 
 func assignmentsPath() string { return filepath.Join(uploadsDir, "assignments.json") }
 
@@ -215,10 +219,10 @@ func handleCarStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"online": true, "status": status})
 }
 
-// GET /api/car/preview/{0-2} — what the car currently plays, rendered for the browser.
+// GET /api/car/preview/{slot} — what the car currently plays, rendered for the browser.
 func handleCarPreview(w http.ResponseWriter, r *http.Request) {
 	slot := strings.TrimPrefix(r.URL.Path, "/api/car/preview/")
-	if slot != "0" && slot != "1" && slot != "2" {
+	if n, err := strconv.Atoi(slot); err != nil || n < 0 || n >= numStates {
 		jsonErr(w, 404, "bad slot")
 		return
 	}
@@ -272,8 +276,8 @@ func handleAssign(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad request body")
 		return
 	}
-	if req.State < 0 || req.State > 2 {
-		jsonErr(w, 400, "state must be 0..2")
+	if req.State < 0 || req.State >= numStates {
+		jsonErr(w, 400, fmt.Sprintf("state must be 0..%d", numStates-1))
 		return
 	}
 	p, err := findProfile(req.Profile)
@@ -324,7 +328,7 @@ func handleAssign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "frames": len(a.Bitmaps), "bytes": len(blob)})
 }
 
-// GET /api/assignments — [3] of {name,frames,bytes} or null, index = state.
+// GET /api/assignments — one {name,frames,bytes} or null per state, index = state.
 func handleAssignments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, assignments)
 }
