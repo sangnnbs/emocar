@@ -136,6 +136,21 @@ int main() {
   feed(0.5f, 0.5f, 0.5f, 900);            // ...and past EXIT_HOLD_MS
   expect("1.5 s after the motion stopped", NORMAL);
 
+  // --- 10. a poisoned bias heals itself (P4.2) -----------------------------
+  // Reproduces what happened on the bench twice: the car booted while being handled, so
+  // calibration baked an offset into the bias. Every later reading carries it, RMS never
+  // falls below stillRms, and the car can never say it is resting on the floor again.
+  // Boot now refuses such a window (P4.1); this checks the car also recovers on its own.
+  printf("bias poisoned by 18 dps, car left sitting on the floor\n");
+  reset();
+  feed(0.4f, 0.3f, 18.0f, 2000);          // still, but reading a phantom 18 dps of yaw
+  expect("phantom rotation is believed at first", FAST);
+  printf("  ..  jitter %.2f dps while 'spinning' at 18 — level lies, spread does not\n",
+         motionGet().jitter);
+  feed(0.4f, 0.3f, 18.0f, 60000);         // left alone on the floor for a minute
+  expect("after a minute at rest, back to itself", NORMAL);
+  expectCtx("and on the floor, not in a hand", false);
+
   printf("\n%s\n", fails ? "FAILURES" : "all scenarios pass");
   return fails != 0;
 }

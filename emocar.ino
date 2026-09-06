@@ -54,26 +54,52 @@ static void halt(const char *why, uint8_t got) {
 }
 
 // Average CALIB_MS of polled samples while the car is still; store as bias.
+//
+// A bias measured while the car is moving is silently poisoned — the offset is baked in
+// and every later reading carries it, so the car can sit motionless reading 18 dps and
+// never return to NORMAL. So the window is only accepted if the samples were *steady*:
+// jitter (spread about the mean), never the mean itself, because the mean is exactly what
+// a bad bias corrupts. Below rest level it retries, showing "keep still" until it gets a
+// quiet window. Two of these were caught by hand during bring-up; now the car catches them.
 static void calibrate() {
+  const float k = gyroSensitivity();
   Serial.println("Calibrating bias — keep still...");
   animMessage("CALIBRATING", "keep still", "");
-  long sx = 0, sy = 0, sz = 0; int n = 0;
-  uint32_t t0 = millis();
-  while (millis() - t0 < CALIB_MS) {
-    GyroRaw r;
-    if (gyroDataReady() && gyroReadRaw(r)) { sx += r.x; sy += r.y; sz += r.z; n++; }
-    delay(2);
+
+  for (int attempt = 1; ; attempt++) {
+    double sx = 0, sy = 0, sz = 0, ssq = 0; int n = 0;
+    uint32_t t0 = millis();
+    while (millis() - t0 < CALIB_MS) {
+      GyroRaw r;
+      if (gyroDataReady() && gyroReadRaw(r)) {
+        float gx = r.x * k, gy = r.y * k, gz = r.z * k;
+        sx += gx; sy += gy; sz += gz;
+        ssq += (double)gx * gx + (double)gy * gy + (double)gz * gz;
+        n++;
+      }
+      delay(2);
+    }
+    if (n == 0) halt("no samples", 0);
+
+    float bx = sx / n, by = sy / n, bz = sz / n;
+    float var = ssq / n - ((double)bx * bx + (double)by * by + (double)bz * bz);
+    float jitter = var > 0 ? sqrtf(var) : 0;
+
+    if (jitter <= REST_JITTER_DPS) {
+      motionSetBias(bx, by, bz);
+      Serial.printf("Bias: X=%.2f Y=%.2f Z=%.2f dps (%d samples, jitter %.2f)\n",
+                    bx, by, bz, n, jitter);
+      return;
+    }
+    Serial.printf("! moved during calibration (jitter %.1f dps > %.1f) — retry %d\n",
+                  jitter, REST_JITTER_DPS, attempt);
+    animMessage("CALIBRATING", "keep still", "moved - retrying");
   }
-  if (n == 0) halt("no samples", 0);
-  const float k = gyroSensitivity();
-  float bx = (float)sx / n * k, by = (float)sy / n * k, bz = (float)sz / n * k;
-  motionSetBias(bx, by, bz);
-  Serial.printf("Bias: X=%.2f Y=%.2f Z=%.2f dps (%d samples)\n", bx, by, bz, n);
 }
 
 static void printTelemetry(const Motion &m) {
-  Serial.printf("%8.1f %8.1f %8.1f | rms %6.1f pk %6.1f | gz pk %6.1f | roll %6.1f %s | %4lu sps | %s\n",
-                m.gx, m.gy, m.gz, m.rms, m.rmsPeak, m.gzPeak,
+  Serial.printf("%8.1f %8.1f %8.1f | rms %6.1f pk %6.1f | jit %5.1f | gz pk %6.1f | roll %6.1f %s | %4lu sps | %s\n",
+                m.gx, m.gy, m.gz, m.rms, m.rmsPeak, m.jitter, m.gzPeak,
                 m.rollAcc, m.handCtx ? "HAND " : "floor",
                 (unsigned long)m.sampleRate, carStateName(m.state));
 }
@@ -106,7 +132,7 @@ void setup() {
   motionReset();
   gyroFifoEnable();
   animShow(motionGet().state);
-  Serial.println("Running. Columns: gx gy gz | rms pk | gz pk | roll ctx | samples/s | state");
+  Serial.println("Running. Columns: gx gy gz | rms pk | jitter | gz pk | roll ctx | samples/s | state");
 }
 
 void loop() {

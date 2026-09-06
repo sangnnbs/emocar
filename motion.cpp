@@ -32,6 +32,9 @@ static const float SAMPLE_S = SAMPLE_US / 1000000.0f;
 static Motion  m;
 static float   biasX, biasY, biasZ;
 static float   rmsBuf[RMS_WINDOW]; static int rmsIdx; static float rmsSum;
+static float   xBuf[RMS_WINDOW], yBuf[RMS_WINDOW], zBuf[RMS_WINDOW];   // per-axis means
+static float   xSum, ySum, zSum;
+static uint32_t restSince;              // how long jitter has been at rest level
 static uint32_t peakSince, rateSince, sampleCount;
 static CarState candidate; static uint32_t condSince;
 
@@ -43,12 +46,14 @@ static uint32_t rollSince, stillSince, quietSince;   // context-bit windows
 static bool     doseActive;               // spin/shake was running on the last sample
 
 void motionSetBias(float bx, float by, float bz) { biasX = bx; biasY = by; biasZ = bz; }
+void motionGetBias(float &bx, float &by, float &bz) { bx = biasX; by = biasY; bz = biasZ; }
 
 void motionReset() {
   m = Motion{};
-  for (int i = 0; i < RMS_WINDOW; i++) rmsBuf[i] = 0;
-  rmsIdx = 0; rmsSum = 0; sampleCount = 0;
+  for (int i = 0; i < RMS_WINDOW; i++) rmsBuf[i] = xBuf[i] = yBuf[i] = zBuf[i] = 0;
+  rmsIdx = 0; rmsSum = xSum = ySum = zSum = 0; sampleCount = 0;
   peakSince = rateSince = condSince = rollSince = stillSince = quietSince = millis();
+  restSince = millis();
   candidate = NORMAL;
   spinCond = shakeCond = fastCond = false;
   spinDir = 0; spinSince = shakeSince = millis();
@@ -157,13 +162,34 @@ bool motionUpdate(const GyroRaw &raw) {
   m.gz = raw.z * k - biasZ;
 
   float sq = m.gx * m.gx + m.gy * m.gy + m.gz * m.gz;
-  rmsSum += sq - rmsBuf[rmsIdx];              // running sum, O(1)
+  rmsSum += sq     - rmsBuf[rmsIdx];          // running sums, O(1)
+  xSum   += m.gx   - xBuf[rmsIdx];
+  ySum   += m.gy   - yBuf[rmsIdx];
+  zSum   += m.gz   - zBuf[rmsIdx];
   rmsBuf[rmsIdx] = sq;
+  xBuf[rmsIdx] = m.gx; yBuf[rmsIdx] = m.gy; zBuf[rmsIdx] = m.gz;
   rmsIdx = (rmsIdx + 1) % RMS_WINDOW;
   m.rms = sqrtf(rmsSum / RMS_WINDOW);
   sampleCount++;
 
+  // Jitter = spread about the window mean, i.e. RMS with any constant offset removed
+  // (var = E[g²] - E[g]²). This is the only honest "is it being moved?" test, because a
+  // bad bias inflates the mean and leaves the spread untouched.
+  float mx = xSum / RMS_WINDOW, my = ySum / RMS_WINDOW, mz = zSum / RMS_WINDOW;
+  float var = rmsSum / RMS_WINDOW - (mx * mx + my * my + mz * mz);
+  m.jitter = var > 0 ? sqrtf(var) : 0;
+
   uint32_t now = millis();
+
+  // Continuous re-zeroing (P4.2). While the car is demonstrably not being moved, leak the
+  // residual mean into the bias. This corrects temperature drift, and — the reason it
+  // exists — a bias poisoned by a car that was moving at boot: the car recovers on its own
+  // once it is set down, instead of being wrong until the next reset.
+  if (m.jitter > REST_JITTER_DPS) restSince = now;
+  else if (now - restSince >= REZERO_AFTER_MS) {
+    const float k = SAMPLE_S / (REZERO_TAU_MS / 1000.0f);
+    biasX += mx * k; biasY += my * k; biasZ += mz * k;
+  }
   if (now - peakSince > PEAK_HOLD_MS) { m.rmsPeak = 0; m.gzPeak = 0; peakSince = now; }
   if (m.rms > m.rmsPeak)      m.rmsPeak = m.rms;
   if (fabsf(m.gz) > m.gzPeak) m.gzPeak  = fabsf(m.gz);

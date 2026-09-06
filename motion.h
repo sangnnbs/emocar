@@ -15,6 +15,7 @@ struct Motion {
   float gx, gy, gz;       // bias-corrected, dps
   float rms;              // 3-axis vibration RMS over RMS_WINDOW_MS
   float rmsPeak, gzPeak;  // peak hold over PEAK_HOLD_MS — for threshold tuning
+  float jitter;           // wobble around the mean — stillness independent of any bias error
   float rollAcc;          // accumulated roll angle (deg) — the context bit's input
   bool  handCtx;          // true = in a hand; gates HAPPY on and FAST off
   CarState state;
@@ -22,6 +23,7 @@ struct Motion {
 };
 
 void        motionSetBias(float bx, float by, float bz);
+void        motionGetBias(float &bx, float &by, float &bz);
 void        motionReset();
 // Returns true if the state changed on this sample.
 bool        motionUpdate(const GyroRaw &raw);

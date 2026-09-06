@@ -47,6 +47,15 @@
 #define GYRO_FS_DPS 2000      // full scale: 250, 500 or 2000
 #define CALIB_MS    1500      // zero-rate bias averaging time at boot (car must be still)
 
+// Stillness is judged by *jitter* — the wobble around the mean — never by the mean itself.
+// A wrong bias moves the mean without moving the jitter: a bias poisoned by movement during
+// calibration read +18.5 dps on gz while the sample-to-sample wobble stayed at ±0.5, so a
+// level test sees a violently spinning car and a jitter test sees a perfectly still one.
+// Everything that asks "is the car being moved?" therefore asks about jitter (P4).
+#define REST_JITTER_DPS  1.5f // wobble below this = the car is not being moved
+#define REZERO_AFTER_MS  3000 // ...and after this long at rest, start correcting the bias
+#define REZERO_TAU_MS   20000 // exponential time constant of that correction (gentle on purpose)
+
 // ---------- animation ----------
 #define ANIM_MIN_FRAME_MS 30  // floor for a frame delay read from the .qgif (0 in file → 100)
 #define PEAK_HOLD_MS      3000 // peak readout reset period — only used by the Serial telemetry

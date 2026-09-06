@@ -301,9 +301,29 @@ Three separate weaknesses:
    audience; (3) silent self-tuning — **rejected**, unpredictable and un-debuggable
    for little gain.
 
-- [ ] Boot: stillness check + retry before accepting bias
-- [ ] Continuous slow bias re-zeroing at rest
+**P4.1 and P4.2 implemented 2026-09-06**, after a poisoned bias broke the car's ability to
+return to NORMAL twice on the bench. Both key on **jitter** — the spread of the samples
+about their own mean — never on the level, because the level is precisely what a bad bias
+corrupts. `motionUpdate()` now tracks per-axis running means alongside the existing sum of
+squares, so `jitter = sqrt(E[g²] − E[g]²)` costs three more running sums and no new pass.
+
+Boot refuses a window whose jitter is above rest level and retries, showing "keep still"
+until it gets a quiet one. At rest, the residual mean leaks into the bias with a 20 s time
+constant, so a car that was mis-calibrated recovers on its own once it is set down instead
+of staying wrong until the next reset.
+
+⚠️ Known hole, and the reason the gyro watchdog belongs on the list: **a wedged sensor
+returning the same sample forever has zero jitter**, so it reads as perfectly still. If the
+bus dies completely `calibrate()` still halts with `GYRO ERROR` (no samples at all), but a
+sensor that keeps ACKing with stale data would pass. Jitter answers "is it moving?" — it
+cannot answer "is this data new?".
+
+- [x] Boot: stillness check + retry before accepting bias
+- [x] Continuous slow bias re-zeroing at rest
+- [ ] Verify on hardware once the gyro wiring is repaired (bench gyro wedged 2026-09-06)
 - [ ] Tier 1: /config endpoint + NVS + live telemetry chart in server UI → **P6**
+- [ ] `REST_JITTER_DPS` 1.5 is a guess — measured rest jitter is ~0.5, so there is margin,
+      but confirm it sits below the quietest real handling (P5)
 - [ ] Tier 2 (later, with audience): guided calibration wizard
 
 ### P5 — Tunables are guesses until tried on the car
