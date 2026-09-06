@@ -32,7 +32,7 @@ static bool     spinCond, shakeCond, fastCond;
 static int      spinDir; static uint32_t spinSince, shakeSince;
 static float    dose;                     // Σ|g|·dt while spinning/shaking, degrees
 static uint32_t dizzyUntil;               // wooze deadline armed when that stops
-static uint32_t rollSince, stillSince;    // context-bit windows
+static uint32_t rollSince, stillSince, quietSince;   // context-bit windows
 static bool     doseActive;               // spin/shake was running on the last sample
 
 void motionSetBias(float bx, float by, float bz) { biasX = bx; biasY = by; biasZ = bz; }
@@ -41,7 +41,7 @@ void motionReset() {
   m = Motion{};
   for (int i = 0; i < RMS_WINDOW; i++) rmsBuf[i] = 0;
   rmsIdx = 0; rmsSum = 0; sampleCount = 0;
-  peakSince = rateSince = condSince = rollSince = stillSince = millis();
+  peakSince = rateSince = condSince = rollSince = stillSince = quietSince = millis();
   candidate = NORMAL;
   spinCond = shakeCond = fastCond = false;
   spinDir = 0; spinSince = shakeSince = millis();
@@ -82,22 +82,29 @@ static void updateShake(uint32_t now) {
   if (now - shakeSince >= SHAKE_HOLD_MS) shakeCond = true;
 }
 
-// Floor -> hand on accumulated roll, hand -> floor on stillness. Sticky on purpose:
-// holding the car level for a moment must not read as putting it down.
+// Floor -> hand on roll travel, hand -> floor on stillness. Sticky on purpose: holding
+// the car level for a moment must not read as putting it down.
+//
+// Travel is unsigned. A signed angle cancels itself out — turning the car over and back
+// nets zero, yet it is still a thing only a hand can do. And the accumulator survives
+// quiet *samples*: gy crosses zero several times a second during real handling, so
+// clearing on the first quiet sample wiped the gesture before it ever reached the
+// threshold (measured: 8 s of handling never got past 5 deg). Only a continuously quiet
+// HAND_QUIET_MS — the car lying flat, not a direction change — clears it.
 static void updateContext(uint32_t now) {
   if (m.handCtx) {
     if (m.rms > STILL_RMS) stillSince = now;
     else if (now - stillSince >= HAND_SETTLE_MS) { m.handCtx = false; m.rollAcc = 0; }
     return;
   }
-  if (fabsf(m.gy) < HAND_QUIET_DPS) {          // lying flat: nothing to accumulate
-    m.rollAcc = 0; rollSince = now; return;
-  }
-  if (now - rollSince > HAND_TILT_MS) {         // window expired without enough tilt
+  if (fabsf(m.gy) >= HAND_QUIET_DPS) {
+    quietSince = now;
+    if (now - rollSince > HAND_TILT_MS) { m.rollAcc = 0; rollSince = now; }   // window expired
+    m.rollAcc += fabsf(m.gy) * SAMPLE_S;                                      // dps * s = degrees
+    if (m.rollAcc >= HAND_TILT_DEG) { m.handCtx = true; stillSince = now; }
+  } else if (now - quietSince >= HAND_QUIET_MS) {   // lying flat, not just passing through 0
     m.rollAcc = 0; rollSince = now;
   }
-  m.rollAcc += m.gy * SAMPLE_S;                 // dps * s = degrees
-  if (fabsf(m.rollAcc) >= HAND_TILT_DEG) { m.handCtx = true; stillSince = now; }
 }
 
 // Dose is the whole aftermath mechanism: accumulate rotation while it is happening,

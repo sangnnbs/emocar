@@ -64,9 +64,12 @@
 #define NET_IO_TIMEOUT_MS 3000          // per-read deadline while receiving an upload
 
 // ---------- motion state machine ----------
-// Four states (PLANS.md P2): NORMAL / FAST / DIZZY / HAPPY. Every number below is a
-// guess until the on-car tuning session (P5) — none of them have been measured.
-// Measured on tinicar: rest rms ≈ 1, car rolling pk ≈ 6, hand shake pk ≈ 80, car spin |gz| ≈ 60
+// Four states (PLANS.md P2): NORMAL / FAST / DIZZY / HAPPY.
+// Measured 2026-09-06 on the bare board over serial (not yet on the car):
+//   at rest on a desk      rms 0.5-0.6, per-axis |g| < 0.5   (bias variance, not motion)
+//   held in a palm, casual rms p50 35, p90 75, spikes to 255
+//   a pickup/yank burst    rms 150-380, gz pk 400-730
+// Older tinicar figures, still unconfirmed here: car rolling pk ≈ 6, car spin |gz| ≈ 60
 #define HOLD_MS          200    // a condition must persist this long before the state flips
 #define RMS_WINDOW_MS    250    // vibration RMS window
 
@@ -79,11 +82,12 @@
 // keys on sheer magnitude instead (shaking by hand is more violent than driving).
 #define SPIN_ENTER_DPS  40.0f   // |gz| to enter the spin path (one sign held for HOLD_MS)
 #define SPIN_EXIT_DPS   25.0f   // |gz| below which the spin ends (a sign flip does not)
-// The bar to clear is a pickup, not FAST: RMS includes *steady* rotation, so a
-// smooth 30 dps lift-and-tilt already reads ~30 — a shake has to be visibly more
-// violent than that (tinicar hand shake pk ≈ 80 dps ≈ RMS 55) or every pickup is 🥴.
-#define SHAKE_ENTER_RMS 45.0f   // RMS to enter the shake path
-#define SHAKE_EXIT_RMS  30.0f   // RMS below which the shake ends
+// The bar to clear is ordinary handling, not FAST. Measured: just holding the board
+// and turning it over runs rms p50 35 / p90 75, so 45 sat near the *median* of casual
+// handling and everything became 🥴. 120 puts 🥴 above anything a calm hand produces —
+// it has to be a deliberate shake. Re-measure on the car; a car is heavier and damper.
+#define SHAKE_ENTER_RMS 120.0f  // RMS to enter the shake path
+#define SHAKE_EXIT_RMS   80.0f  // RMS below which the shake ends
 #define SHAKE_HOLD_MS    300    // shake must persist this long (rejects a single jolt)
 
 // DIZZY aftermath — dose = Σ|g|·dt over the spin/shake, in degrees of total rotation.
@@ -93,12 +97,19 @@
 #define DIZZY_MAX_MS     8000   // ...and a long spin can't lock the face up
 
 // Context bit — floor vs hand. Gates HAPPY on and FAST off; nothing else reads it.
-// Enter on tilt: a car on wheels physically cannot hold a roll angle, a hand does it
-// constantly. Leave on stillness: a set-down car settles, a hand never does.
+// Enter on roll travel: a car on wheels cannot turn about its long axis, a hand does it
+// constantly. Leave on stillness: a set-down car settles (rms 0.5), a hand does not
+// (rms never fell below ~10 while held, so 2 s of quiet really does mean "put down").
+//
+// Travel is UNSIGNED: tilting one way and back nets to zero as a signed angle, but it
+// is still something only a hand can do. 25 deg within the window needs |gy| averaging
+// 12.5 dps, and a car rolling on the floor peaks around 6 — so the floor cannot fake it.
 #define STILL_RMS        2.0f   // RMS at rest; load-bearing — it decides put-down (P5)
-#define HAND_TILT_DEG   25.0f   // accumulated |roll| that means "someone picked me up"
+#define HAND_TILT_DEG   25.0f   // roll travel that means "someone picked me up"
 #define HAND_TILT_MS     2000   // ...within this window, else the accumulator restarts
-#define HAND_QUIET_DPS   3.0f   // |gy| below this = lying flat: reset the accumulator
+#define HAND_QUIET_DPS   3.0f   // |gy| below this is noise: don't integrate it
+#define HAND_QUIET_MS     300   // ...and only clear the accumulator after this much quiet,
+                                // or every zero-crossing mid-gesture wipes it (measured bug)
 #define HAND_SETTLE_MS   2000   // stillness this long = set back down
 
 // ---------- derived (don't edit) ----------
