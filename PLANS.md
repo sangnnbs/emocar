@@ -320,7 +320,10 @@ cannot answer "is this data new?".
 
 - [x] Boot: stillness check + retry before accepting bias
 - [x] Continuous slow bias re-zeroing at rest
-- [ ] Verify on hardware once the gyro wiring is repaired (bench gyro wedged 2026-09-06)
+- [x] Verified on hardware 2026-09-06 after the gyro wiring was repaired: clean boot bias
+      (all axes within ±0.8), and `rms` and `jit` now read equal at rest — when they
+      diverge, that *is* the bias fault, visible at a glance on every telemetry line.
+      Pick up → HAND → HAPPY; set down untouched → context clears → NORMAL on its own.
 - [ ] Tier 1: /config endpoint + NVS + live telemetry chart in server UI → **P6**
 - [ ] `REST_JITTER_DPS` 1.5 is a guess — measured rest jitter is ~0.5, so there is margin,
       but confirm it sits below the quietest real handling (P5)
