@@ -53,6 +53,63 @@ static void expectCtx(const char *what, bool want) {
 
 static void reset() { fakeMillis = 1000; motionReset(); }
 
+// Boot calibration (P4.1). Samples are generated at SAMPLE_US from f(t) and averaged per
+// CALIB_BLOCK_MS block, exactly as calibrate() does on the board, then fitted.
+static const float BIAS[3] = { 0.8f, -1.2f, 0.4f };       // a plausible zero-rate offset
+static bool calibOn(void (*f)(float t, float g[3]), float bias[3], int &agree) {
+  float blk[CALIB_BLOCKS][3];
+  const int per = CALIB_BLOCK_MS * 1000 / SAMPLE_US;
+  for (int b = 0; b < CALIB_BLOCKS; b++) {
+    double s[3] = { 0, 0, 0 };
+    for (int i = 0; i < per; i++) {
+      float g[3]; f((b * per + i) * SAMPLE_US / 1e6f, g);
+      for (int a = 0; a < 3; a++) s[a] += BIAS[a] + g[a];
+    }
+    for (int a = 0; a < 3; a++) blk[b][a] = s[a] / per;
+  }
+  return motionCalibFit(blk, CALIB_BLOCKS, bias, agree);
+}
+static void expectCalib(const char *what, void (*f)(float, float[3]), bool wantOk) {
+  float bias[3] = { 0, 0, 0 }; int agree;
+  bool ok = calibOn(f, bias, agree);
+  float err = 0;
+  for (int a = 0; a < 3; a++) err = fmaxf(err, fabsf(bias[a] - BIAS[a]));
+  bool pass = ok == wantOk && (!ok || err < 0.2f);   // accepted must also mean *right*
+  if (!pass) fails++;
+  printf("  %s %-46s %s (%2d/%d agree", pass ? "ok  " : "FAIL", what,
+         ok ? "accepted" : "refused ", agree, CALIB_BLOCKS);
+  if (ok) printf(", bias off by %.2f dps", err);
+  printf(")\n");
+}
+// Deterministic noise: sensor noise ~0.3 dps per axis, as measured at rest.
+static float noise(float t, int a) { return 0.3f * sinf(t * (977.0f + 131.0f * a)); }
+static void still(float t, float g[3]) { for (int a = 0; a < 3; a++) g[a] = noise(t, a); }
+// A tap at 0.6 s: a 60 dps kick that rings down at 8 Hz over ~250 ms, then nothing.
+static void tap(float t, float g[3]) {
+  still(t, g);
+  float d = t - 0.6f;
+  if (d >= 0 && d < 0.25f) {
+    float r = 60.0f * expf(-d / 0.08f) * cosf(6.2832f * 8.0f * d);
+    g[0] += r; g[1] += 0.5f * r; g[2] -= 0.3f * r;
+  }
+}
+static void twoTaps(float t, float g[3]) { tap(t, g); float h[3]; tap(t - 0.7f, h);
+  if (t >= 1.3f) for (int a = 0; a < 3; a++) g[a] += h[a] - noise(t - 0.7f, a); }
+// A rumble through the floor the whole window: 3 dps at 35 Hz, every axis.
+static void rumble(float t, float g[3]) {
+  still(t, g);
+  for (int a = 0; a < 3; a++) g[a] += 3.0f * sinf(6.2832f * 35.0f * t + a);
+}
+// Held in a palm: slow wandering turns, rms ~35 dps (measured p50), never settles.
+static void palm(float t, float g[3]) {
+  still(t, g);
+  g[0] += 30.0f * sinf(6.2832f * 0.9f * t);
+  g[1] += 35.0f * sinf(6.2832f * 1.3f * t + 1.0f);
+  g[2] += 25.0f * sinf(6.2832f * 0.7f * t + 2.0f);
+}
+// Picked up for the first 0.9 s of the window, then set down: most blocks are spoiled.
+static void setDownLate(float t, float g[3]) { if (t < 0.9f) palm(t, g); else still(t, g); }
+
 int main() {
   // --- 1. idle on a desk stays NORMAL -------------------------------------
   printf("idle on a desk\n");
@@ -161,6 +218,17 @@ int main() {
   feed(0.4f, 0.3f, 18.0f, 60000);         // left alone on the floor for a minute
   expect("after a minute at rest, back to itself", NORMAL);
   expectCtx("and on the floor, not in a hand", false);
+
+  // --- 11. boot calibration tolerates a touch, refuses a hand (P4.1) ------
+  // The old test demanded every sample steady, so one tap failed the whole window. What
+  // actually poisons a bias is the car being *turned*; a tap, a bump or a rumble is not.
+  printf("boot calibration\n");
+  expectCalib("untouched on the floor", still, true);
+  expectCalib("one light tap mid-window", tap, true);
+  expectCalib("two taps", twoTaps, true);
+  expectCalib("floor rumble the whole window", rumble, true);
+  expectCalib("held in a palm", palm, false);
+  expectCalib("still in the hand for 0.9 s of 1.5 s", setDownLate, false);
 
   printf("\n%s\n", fails ? "FAILURES" : "all scenarios pass");
   return fails != 0;

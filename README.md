@@ -68,7 +68,7 @@ arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
 ```
 
 Boot sequence on the OLED: `emocar` splash (shows the WiFi SSID) → `CALIBRATING keep still`
-(1.5 s, car must not move) → 🙂. `GYRO ERROR` means no ACK at 0x69 or wrong WHO_AM_I — see the
+(1.5 s, car on the floor; a tap or a bump is fine, being picked up makes it wait) → 🙂. `GYRO ERROR` means no ACK at 0x69 or wrong WHO_AM_I — see the
 checklist in wiring.md. During a WiFi upload the OLED shows `UPDATING` for a second or two.
 
 Serial (115200) prints one telemetry line per `PRINT_MS`
@@ -78,7 +78,8 @@ Set `PRINT_MS 0` to silence it.
 ⚠️ The calibration window is where things go wrong silently: if the car is moving during
 those 1.5 s the motion is averaged into the zero-rate bias, and every reading afterwards
 carries the offset. A stuck state with a constant non-zero axis at rest is this, not a
-sensor fault — reset with the car flat and still. (PLANS.md P4.1 is the fix.)
+sensor fault — reset with the car flat and still. (PLANS.md P4.1 is the fix: boot waits until
+the car is not being turned, and at rest the bias re-zeroes itself.)
 
 ## Tests
 

@@ -356,6 +356,17 @@ cannot answer "is this data new?".
       (all axes within ±0.8), and `rms` and `jit` now read equal at rest — when they
       diverge, that *is* the bias fault, visible at a glance on every telemetry line.
       Pick up → HAND → HAPPY; set down untouched → context clears → NORMAL on its own.
+- [x] **Boot check was too strict (fixed 2026-09-19).** It demanded every sample in the
+      1.5 s window stay under `REST_JITTER_DPS`, so one light tap or a rumble through the
+      floor failed the window and restarted it — on a car already sitting on the floor. But
+      a tap *rattles without turning*: brief, zero-mean, harmless to the bias. Only a hand
+      turning the car poisons it. Now the window is 15 blocks of 100 ms, each block
+      averaged (a rattle cancels inside it), bias = mean of the blocks within 1 dps of the
+      median (`motionCalibFit`), accepted if ≥ 10/15 agree. A tap spoils 1–2 blocks and is
+      outvoted; a palm spoils all of them. The window rolls block by block, so a
+      disturbance delays calibration instead of restarting it. Host tests cover still,
+      tap, two taps, 35 Hz rumble (accepted, bias within 0.1 dps) and palm / late
+      set-down (refused). Not yet tried on the board.
 - [ ] Tier 1: /config endpoint + NVS + live telemetry chart in server UI → **P6**
 - [ ] `REST_JITTER_DPS` 1.5 is a guess — measured rest jitter is ~0.5, so there is margin,
       but confirm it sits below the quietest real handling (P5)

@@ -45,13 +45,27 @@
 // Allowed: 10000 (100 Hz), 5000 (200 Hz), 2500 (400 Hz), 1250 (800 Hz)
 #define SAMPLE_US   5000
 #define GYRO_FS_DPS 2000      // full scale: 250, 500 or 2000
-#define CALIB_MS    1500      // zero-rate bias averaging time at boot (car must be still)
+#define CALIB_MS    1500      // zero-rate bias window at boot (car on the floor, not held)
+
+// Boot calibration asks "is the car being *turned*?", not "did anything touch it?". A tap,
+// a bump of the table or a rumble through the floor rattles the gyro but turns nothing: it
+// is brief and averages to zero, so it cannot poison the bias. What poisons it is a hand
+// turning the car (the +18.5 dps gz incident). So the window is cut into short blocks,
+// each block is averaged (a rattle cancels inside it), and the bias is the mean of the
+// blocks that agree with the median. A tap spoils a block or two and is simply outvoted;
+// a hand turns the car at a different rate every moment, so its blocks never agree.
+// The window rolls block by block, so a disturbance delays calibration, never restarts it.
+#define CALIB_BLOCK_MS   100    // one block: long enough to average out a rattle
+#define CALIB_BLOCKS     (CALIB_MS / CALIB_BLOCK_MS)
+#define CALIB_AGREE_DPS  1.0f   // a block within this of the median on every axis agrees
+#define CALIB_MIN_AGREE  10     // ...and this many of the CALIB_BLOCKS (15) must agree
 
 // Stillness is judged by *jitter* — the wobble around the mean — never by the mean itself.
 // A wrong bias moves the mean without moving the jitter: a bias poisoned by movement during
 // calibration read +18.5 dps on gz while the sample-to-sample wobble stayed at ±0.5, so a
 // level test sees a violently spinning car and a jitter test sees a perfectly still one.
-// Everything that asks "is the car being moved?" therefore asks about jitter (P4).
+// Continuous re-zeroing therefore asks about jitter (P4). Boot calibration asks a
+// coarser question with the same idea — do the block means agree — see CALIB_* above.
 #define REST_JITTER_DPS  1.5f // wobble below this = the car is not being moved
 #define REZERO_AFTER_MS  3000 // ...and after this long at rest, start correcting the bias
 #define REZERO_TAU_MS   20000 // exponential time constant of that correction (gentle on purpose)

@@ -25,6 +25,9 @@ struct Motion {
 void        motionSetBias(float bx, float by, float bz);
 void        motionGetBias(float &bx, float &by, float &bz);
 void        motionReset();
+// Boot calibration (P4.1): given the mean rate of each of n calibration blocks, returns
+// true and the bias if at least CALIB_MIN_AGREE of them agree on one. `agree` is the count.
+bool        motionCalibFit(const float blk[][3], int n, float bias[3], int &agree);
 // Returns true if the state changed on this sample.
 bool        motionUpdate(const GyroRaw &raw);
 const Motion &motionGet();

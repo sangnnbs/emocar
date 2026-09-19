@@ -30,7 +30,8 @@
  *
  * Flow:
  *   1. Probe gyro, check WHO_AM_I, configure ODR / full scale / BDU.
- *   2. Average zero-rate bias for CALIB_MS — car must be STILL (it shows "CALIBRATING").
+ *   2. Zero-rate bias over CALIB_MS — car on the floor, not held (it shows "CALIBRATING").
+ *      Taps and bumps are tolerated; being picked up or turned makes it wait.
  *   3. Enable FIFO: the chip samples every SAMPLE_US exactly; the loop drains bursts.
  *   4. Per sample: motionUpdate(). On state change: animShow(). Every loop: animTick().
  *
@@ -53,47 +54,46 @@ static void halt(const char *why, uint8_t got) {
   while (true) delay(1000);
 }
 
-// Average CALIB_MS of polled samples while the car is still; store as bias.
+// Zero-rate bias from a rolling window of CALIB_BLOCKS short blocks (CALIB_* in config.h).
 //
-// A bias measured while the car is moving is silently poisoned — the offset is baked in
-// and every later reading carries it, so the car can sit motionless reading 18 dps and
-// never return to NORMAL. So the window is only accepted if the samples were *steady*:
-// jitter (spread about the mean), never the mean itself, because the mean is exactly what
-// a bad bias corrupts. Below rest level it retries, showing "keep still" until it gets a
-// quiet window. Two of these were caught by hand during bring-up; now the car catches them.
+// A bias measured while the car is being turned is silently poisoned — the offset is baked
+// in and every later reading carries it, so the car can sit motionless reading 18 dps and
+// never return to NORMAL. But a tap or a rumble is not that: it rattles without turning,
+// and the old all-samples-steady test threw the whole window away over it. Now each block
+// is averaged and the bias comes from the blocks that agree (motionCalibFit), so a tap is
+// outvoted, and only a hand — whose blocks never agree — keeps it waiting. The window rolls
+// one block at a time, so the car calibrates as soon as the last CALIB_MS looks right.
 static void calibrate() {
   const float k = gyroSensitivity();
   Serial.println("Calibrating bias — keep still...");
   animMessage("CALIBRATING", "keep still", "");
 
-  for (int attempt = 1; ; attempt++) {
-    double sx = 0, sy = 0, sz = 0, ssq = 0; int n = 0;
+  float blk[CALIB_BLOCKS][3];
+  bool waiting = false;
+  for (int b = 0; ; b++) {
+    long sx = 0, sy = 0, sz = 0; int n = 0;
     uint32_t t0 = millis();
-    while (millis() - t0 < CALIB_MS) {
+    while (millis() - t0 < CALIB_BLOCK_MS) {
       GyroRaw r;
-      if (gyroDataReady() && gyroReadRaw(r)) {
-        float gx = r.x * k, gy = r.y * k, gz = r.z * k;
-        sx += gx; sy += gy; sz += gz;
-        ssq += (double)gx * gx + (double)gy * gy + (double)gz * gz;
-        n++;
-      }
+      if (gyroDataReady() && gyroReadRaw(r)) { sx += r.x; sy += r.y; sz += r.z; n++; }
       delay(2);
     }
     if (n == 0) halt("no samples", 0);
+    float *e = blk[b % CALIB_BLOCKS];
+    e[0] = sx * k / n; e[1] = sy * k / n; e[2] = sz * k / n;
+    if (b + 1 < CALIB_BLOCKS) continue;          // window not full yet
 
-    float bx = sx / n, by = sy / n, bz = sz / n;
-    float var = ssq / n - ((double)bx * bx + (double)by * by + (double)bz * bz);
-    float jitter = var > 0 ? sqrtf(var) : 0;
-
-    if (jitter <= REST_JITTER_DPS) {
-      motionSetBias(bx, by, bz);
-      Serial.printf("Bias: X=%.2f Y=%.2f Z=%.2f dps (%d samples, jitter %.2f)\n",
-                    bx, by, bz, n, jitter);
+    float bias[3]; int agree;
+    if (motionCalibFit(blk, CALIB_BLOCKS, bias, agree)) {
+      motionSetBias(bias[0], bias[1], bias[2]);
+      Serial.printf("Bias: X=%.2f Y=%.2f Z=%.2f dps (%d/%d blocks agree)\n",
+                    bias[0], bias[1], bias[2], agree, CALIB_BLOCKS);
       return;
     }
-    Serial.printf("! moved during calibration (jitter %.1f dps > %.1f) — retry %d\n",
-                  jitter, REST_JITTER_DPS, attempt);
-    animMessage("CALIBRATING", "keep still", "moved - retrying");
+    if (!waiting) { animMessage("CALIBRATING", "keep still", "moving - waiting"); waiting = true; }
+    if ((b + 1) % CALIB_BLOCKS == 0)             // once per window, not every block
+      Serial.printf("! car is being turned (%d/%d blocks agree, need %d) — waiting\n",
+                    agree, CALIB_BLOCKS, CALIB_MIN_AGREE);
   }
 }
 

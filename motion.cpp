@@ -52,6 +52,35 @@ static bool     doseActive;               // the spin was running on the last sa
 void motionSetBias(float bx, float by, float bz) { biasX = bx; biasY = by; biasZ = bz; }
 void motionGetBias(float &bx, float &by, float &bz) { bx = biasX; by = biasY; bz = biasZ; }
 
+// Median per axis, then keep the blocks within CALIB_AGREE_DPS of it on every axis. The
+// median is what makes a tap harmless: it cannot move it without spoiling half the window.
+// The bias is the mean of the agreeing blocks only, so the spoiled ones leave no trace.
+bool motionCalibFit(const float blk[][3], int n, float bias[3], int &agree) {
+  float med[3];
+  for (int a = 0; a < 3; a++) {
+    float v[CALIB_BLOCKS];
+    int m = n < CALIB_BLOCKS ? n : CALIB_BLOCKS;
+    for (int i = 0; i < m; i++) {                 // insertion sort, n is ~15
+      float x = blk[i][a]; int j = i;
+      for (; j > 0 && v[j - 1] > x; j--) v[j] = v[j - 1];
+      v[j] = x;
+    }
+    med[a] = v[m / 2];
+  }
+  double sum[3] = { 0, 0, 0 };
+  agree = 0;
+  for (int i = 0; i < n && i < CALIB_BLOCKS; i++) {
+    bool ok = true;
+    for (int a = 0; a < 3; a++) ok = ok && fabsf(blk[i][a] - med[a]) <= CALIB_AGREE_DPS;
+    if (!ok) continue;
+    for (int a = 0; a < 3; a++) sum[a] += blk[i][a];
+    agree++;
+  }
+  if (agree < CALIB_MIN_AGREE) return false;
+  for (int a = 0; a < 3; a++) bias[a] = sum[a] / agree;
+  return true;
+}
+
 void motionReset() {
   m = Motion{};
   for (int i = 0; i < RMS_WINDOW; i++) rmsBuf[i] = xBuf[i] = yBuf[i] = zBuf[i] = 0;
