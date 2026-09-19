@@ -90,6 +90,12 @@ GyroError gyroBegin(uint8_t &whoAmI) {
 
   regWrite(REG_CTRL_REG1, CTRL1_VAL);   // power on, ODR, XYZ enabled (reset default is power-down)
   regWrite(REG_CTRL_REG4, CTRL4_VAL);   // BDU + full scale
+  // An ESP32 reset does not power-cycle the gyro, so it still holds whatever the last run
+  // left: FIFO on, stream mode, 32 samples queued and OVRN set (dumped on the bench). Put
+  // it back in the state the callers assume — FIFO off, so calibrate() reads live data,
+  // and bypass, which also empties the FIFO so gyroFifoEnable() starts clean.
+  regWrite(REG_CTRL_REG5, 0x00);        // FIFO_EN off
+  regWrite(REG_FIFO_CTRL, 0x00);        // bypass mode: empties the FIFO, clears OVRN
   delay(100);
   return GYRO_OK;
 }
@@ -107,8 +113,7 @@ bool gyroReadRaw(GyroRaw &s) {
 
 void gyroFifoEnable() {
   regWrite(REG_FIFO_CTRL, 0x40);   // FM = 010 stream mode
-  regWrite(REG_CTRL_REG5, 0x40);   // FIFO_EN
-  regRead(REG_FIFO_SRC);           // clear any stale OVRN
+  regWrite(REG_CTRL_REG5, 0x40);   // FIFO_EN — starts empty, gyroBegin() left it in bypass
 }
 
 int gyroReadFifo(GyroRaw *out, int maxN, bool &overrun) {

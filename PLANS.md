@@ -544,6 +544,13 @@ say so (`! gyro recovered`). Two observed signatures, both now covered — a har
 *count* still falls, because the FIFO stops filling).
 
 - [x] Watchdog: timeout → error face + periodic re-init, auto-recovery
+- [x] **Boot FIFO overrun (fixed 2026-09-19).** Every reset logged `! FIFO overrun — loop too
+      slow`, but the first read came 45 ms after enable and already held 32 samples + OVRN.
+      Cause: an ESP32 reset does not power-cycle the gyro, so it kept the last run's FIFO
+      (dumped at `gyroBegin`: CTRL5=0x40, FIFO_CTRL=0x40, FIFO_SRC=0xDF), and `gyroBegin()`
+      only wrote CTRL1/4 — calibration was even reading 160 ms-old samples out of the FIFO.
+      `gyroBegin()` now writes FIFO off + bypass (which empties it). Only resets showed it;
+      a power-on starts in bypass, which is why it looked intermittent.
 - [ ] Consider a rolling "distinct sample" check for a sensor that keeps *streaming*
       identical values at full rate — not seen yet, and not worth the code until it is
 - [x] ~~`calibrate()` still `halt()`s if the gyro is dead *at boot*~~ — fixed 2026-09-19,
