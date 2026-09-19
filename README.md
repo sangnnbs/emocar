@@ -68,8 +68,9 @@ arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
 ```
 
 Boot sequence on the OLED: `emocar` splash (shows the WiFi SSID) → `CALIBRATING keep still`
-(1.5 s, car on the floor; a tap or a bump is fine, being picked up makes it wait) → 🙂. `GYRO ERROR` means no ACK at 0x69 or wrong WHO_AM_I — see the
-checklist in wiring.md. During a WiFi upload the OLED shows `UPDATING` for a second or two.
+(1.5 s, car on the floor; a tap or a bump is fine, being picked up makes it wait) → 🙂. `GYRO ERROR` means no ACK at 0x69, wrong WHO_AM_I or no data — see
+the checklist in wiring.md. The car keeps retrying every 2 s, so reseating the wire is enough;
+no reset needed. During a WiFi upload the OLED shows `UPDATING` for a second or two.
 
 Serial (115200) prints one telemetry line per `PRINT_MS`
 (`gx gy gz | rms pk | gz pk | roll ctx | sps | state`) and `>>> state = …` on every change.

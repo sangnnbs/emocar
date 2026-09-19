@@ -30,6 +30,7 @@
  *
  * Flow:
  *   1. Probe gyro, check WHO_AM_I, configure ODR / full scale / BDU.
+ *      A gyro that does not answer shows GYRO ERROR and is retried every GYRO_RETRY_MS.
  *   2. Zero-rate bias over CALIB_MS — car on the floor, not held (it shows "CALIBRATING").
  *      Taps and bumps are tolerated; being picked up or turned makes it wait.
  *   3. Enable FIFO: the chip samples every SAMPLE_US exactly; the loop drains bursts.
@@ -47,11 +48,26 @@
 #include "anim.h"
 #include "net.h"
 
-static void halt(const char *why, uint8_t got) {
-  char l2[24]; snprintf(l2, sizeof l2, "got 0x%02X", got);
-  Serial.printf("FATAL: %s (got 0x%02X)\n", why, got);
-  animMessage("GYRO ERROR", why, l2);
-  while (true) delay(1000);
+// Bring the gyro up at boot, retrying every GYRO_RETRY_MS until it answers. This used to
+// halt(), which turned a jostled wire — or a chip that missed the first boot after a flash,
+// seen on the bench — into a manual reset after the wire was reseated. Same policy as the
+// runtime watchdog: say what is wrong, keep trying, come back by itself. The reason is
+// re-printed on every retry, so a terminal opened after boot still sees why.
+static void gyroUp() {
+  for (int attempt = 1; ; attempt++) {
+    uint8_t who;
+    GyroError e = gyroBegin(who);
+    Serial.printf("WHO_AM_I = 0x%02X\n", who);
+    if (e == GYRO_OK) {
+      if (attempt > 1) Serial.println("! gyro recovered");
+      return;
+    }
+    char l2[24]; snprintf(l2, sizeof l2, "got 0x%02X", who);
+    Serial.printf("! gyro: %s (got 0x%02X) — retry %d in %d ms\n",
+                  gyroErrorText(e), who, attempt, GYRO_RETRY_MS);
+    animMessage("GYRO ERROR", gyroErrorText(e), l2);
+    delay(GYRO_RETRY_MS);
+  }
 }
 
 // Zero-rate bias from a rolling window of CALIB_BLOCKS short blocks (CALIB_* in config.h).
@@ -63,10 +79,12 @@ static void halt(const char *why, uint8_t got) {
 // is averaged and the bias comes from the blocks that agree (motionCalibFit), so a tap is
 // outvoted, and only a hand — whose blocks never agree — keeps it waiting. The window rolls
 // one block at a time, so the car calibrates as soon as the last CALIB_MS looks right.
-static void calibrate() {
+//
+// Returns false if the gyro delivers no samples at all (answering on I2C is not the same
+// as producing data — a wedged chip does the one without the other); the caller re-inits.
+static bool calibrate() {
   const float k = gyroSensitivity();
   Serial.println("Calibrating bias — keep still...");
-  animMessage("CALIBRATING", "keep still", "");
 
   float blk[CALIB_BLOCKS][3];
   bool waiting = false;
@@ -78,7 +96,12 @@ static void calibrate() {
       if (gyroDataReady() && gyroReadRaw(r)) { sx += r.x; sy += r.y; sz += r.z; n++; }
       delay(2);
     }
-    if (n == 0) halt("no samples", 0);
+    if (n == 0) {
+      Serial.println("! gyro answers but delivers no samples — check wiring (SDA 8 / SCL 9)");
+      animMessage("GYRO ERROR", "no data", "check wiring");
+      return false;
+    }
+    if (b == 0) animMessage("CALIBRATING", "keep still", "");   // only once data is flowing
     float *e = blk[b % CALIB_BLOCKS];
     e[0] = sx * k / n; e[1] = sy * k / n; e[2] = sz * k / n;
     if (b + 1 < CALIB_BLOCKS) continue;          // window not full yet
@@ -88,7 +111,7 @@ static void calibrate() {
       motionSetBias(bias[0], bias[1], bias[2]);
       Serial.printf("Bias: X=%.2f Y=%.2f Z=%.2f dps (%d/%d blocks agree)\n",
                     bias[0], bias[1], bias[2], agree, CALIB_BLOCKS);
-      return;
+      return true;
     }
     if (!waiting) { animMessage("CALIBRATING", "keep still", "moving - waiting"); waiting = true; }
     if ((b + 1) % CALIB_BLOCKS == 0)             // once per window, not every block
@@ -121,14 +144,14 @@ void setup() {
   delay(500);
 
   Serial.println("\nemocar bring-up");
-  uint8_t who;
-  GyroError e = gyroBegin(who);
-  Serial.printf("WHO_AM_I = 0x%02X\n", who);
-  if (e != GYRO_OK) halt(gyroErrorText(e), who);
   Serial.printf("Sample period %d us (%d Hz), RMS window %d samples\n",
                 SAMPLE_US, 1000000 / SAMPLE_US, RMS_WINDOW);
 
-  calibrate();
+  for (;;) {                       // never halt: a dead gyro at boot is retried, not fatal
+    gyroUp();
+    if (calibrate()) break;
+    delay(GYRO_RETRY_MS);
+  }
   motionReset();
   gyroFifoEnable();
   animShow(motionGet().state);

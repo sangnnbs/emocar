@@ -546,9 +546,11 @@ say so (`! gyro recovered`). Two observed signatures, both now covered — a har
 - [x] Watchdog: timeout → error face + periodic re-init, auto-recovery
 - [ ] Consider a rolling "distinct sample" check for a sensor that keeps *streaming*
       identical values at full rate — not seen yet, and not worth the code until it is
-- [ ] `calibrate()` still `halt()`s if the gyro is dead *at boot*, so a reseated wire needs
-      a manual reset to be noticed. Same retry treatment would make the car self-healing
-      end to end — worth doing while the bench wiring stays this fragile
+- [x] ~~`calibrate()` still `halt()`s if the gyro is dead *at boot*~~ — fixed 2026-09-19,
+      after it happened on the first boot following a flash (GYRO ERROR, then fine after a
+      reset). Boot now retries every `GYRO_RETRY_MS` like the watchdog: `gyroUp()` until
+      WHO_AM_I answers, and a calibration block with no samples at all sends it back there.
+      The reason is re-printed on every retry, so a terminal opened late still sees it.
 
 ## Open questions
 
