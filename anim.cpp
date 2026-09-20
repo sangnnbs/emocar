@@ -1,6 +1,6 @@
 // anim.cpp — plays one .qgif per CarState without ever blocking.
 //
-// Source per slot: /anim<N>.qgif in LittleFS (uploaded over WiFi, see net.cpp),
+// Source per slot: /anim<N>.qgif in LittleFS (uploaded over USB, see cmd.cpp),
 // falling back to the PROGMEM placeholder in anim_data.h when the file is
 // missing or invalid. File frames are streamed one frame at a time, so
 // animation size is bounded by flash, not RAM.

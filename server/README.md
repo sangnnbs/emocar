@@ -1,14 +1,14 @@
 # emocar server
 
 Web UI on the PC that turns emoji GIFs into `.qgif` animations and pushes them to the
-car over its WiFi hotspot. Replaces the compile-time `mkanim.py` embed for real GIFs
+car over its USB cable. Replaces the compile-time `mkanim.py` embed for real GIFs
 (`mkanim.py` now only generates the PROGMEM placeholder faces).
 
 ```
 browser ── localhost:8080 ──> emocar-server (Go, this dir)
                                    │  scans ../emoji_lib, ../downloads/00_Main
                                    │  GIF -> .qgif for the selected display profile (profiles.json)
-                                   └── PUT http://192.168.4.1/anim/<0|1|2> ──> car (WiFi AP "emocar")
+                                   └── PUT <slot> <len> over /dev/ttyACM0 ──> car (USB serial)
 ```
 
 `../gifs` is deliberately not scanned: it holds renamed copies of emoji_lib files
@@ -20,7 +20,7 @@ same animation in the library twice and made state assignments look duplicated.
 `profiles.json` (embedded in the binary) is the master list of supported panels — id,
 resolution, pixel format (`mono1` / `gray4` / `rgb565`) and conversion defaults. The UI's
 **display** selector picks which profile to convert and preview for; it follows the
-profile the car reports in `/status` until you choose one manually. The firmware's
+profile the car reports in `STATUS` until you choose one manually. The firmware's
 `config.h` `DISP_*` block must match the entry for the panel it was compiled for — the
 car (and the server, for ready-made `.qgif` files) refuses mismatched pushes.
 
@@ -34,16 +34,22 @@ cd ~/sang/esp32/emocar/server
 make run                        # build + UI on http://localhost:8080
 ```
 
-`make` alone lists the targets: `run`, `open`, `status`, `assign STATE=2 GIF=hoamat.gif`,
-`vet`, `clean`.
+`make` alone lists the targets: `run`, `down`, `open`, `status`,
+`assign STATE=2 GIF=hoamat.gif`, `vet`, `clean`.
 
-Join the `emocar` WiFi network (password in `../config.h`, default `emocar123`) so the
-server can reach the car at `192.168.4.1`. Flags: `-listen`, `-car`, `-lib` (comma-separated
-library dirs), `-uploads` (where browser-added GIFs are saved).
+Plug the car in over USB. The server finds it by its Espressif USB id (VID `303A`) —
+`-port /dev/ttyACM0` (or `COM5`, `/dev/cu.usbmodem…`) overrides that when more than one
+ESP32 is attached. Other flags: `-listen`, `-lib` (comma-separated library dirs),
+`-uploads` (where browser-added GIFs are saved).
+
+**The server holds the port open**, so it must be stopped before reflashing the car —
+`make down`, flash, `make run`. It reconnects by itself whenever the cable is unplugged
+and plugged back in. It never asserts DTR/RTS: on the C3 those lines are esptool's reset
+sequence, so touching them would reboot the car every time the server connected.
 
 ## Using it
 
-- **Three state cards** show what the car currently plays — including which library gif
+- **Four state cards** show what the car currently plays — including which library gif
   it is (the server remembers every assignment in `<uploads>/assignments.json`; the name
   is only shown when the byte size still matches what's on the car). The live state is
   highlighted; "placeholder" = no file uploaded yet. Click a card to target that state.
@@ -61,24 +67,43 @@ library dirs), `-uploads` (where browser-added GIFs are saved).
   Ready-made `.qgif` files are sent as-is, no knobs.
 - **+ add GIF** copies a new file into `../downloads/uploads/` and it appears in the library.
 
-The car stores only the three active animations (LittleFS `/anim0..2.qgif`); the library
+The car stores only the four active animations (LittleFS `/anim0..3.qgif`); the library
 never leaves the PC. Uploads survive power cycles and firmware reflashes.
 
-## Car HTTP API (net.cpp on the ESP32)
+## Car serial protocol (cmd.cpp on the ESP32)
 
-| Route | Effect |
+One command line, then a fixed-length raw payload — the serial equivalent of
+`Content-Length`, and for the same reason: the `.qgif` is streamed straight to LittleFS,
+never buffered in RAM.
+
+| Command | Reply |
 |---|---|
-| `GET /status` | `{state, heap, uptime, profile, w, h, format, slots:[{file,frames,bytes}×3]}` |
-| `GET /anim/<n>` | the slot's `.qgif` (404 while the placeholder is in use) |
-| `PUT /anim/<n>` | replace slot: stream to temp file, validate header+length, rename, reload |
+| `STATUS` | `OK {state, heap, uptime, profile, w, h, format, slots:[{file,frames,bytes}×4]}` |
+| `GET <n>` | `OK <len>` + `<len>` raw bytes (`ERR placeholder in use` when the slot has no file) |
+| `PUT <n> <len>` | `READY <chunk>`, then the payload one chunk at a time, each answered `ACK <got>` once it is on flash, and `OK <bytes>` at the end |
 
-A PUT shows `UPDATING` on the OLED and blocks the motion loop for the transfer (~1–2 s).
+Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. The same port also carries
+the car's telemetry printing — a line every 250 ms — so a client reads past any line that
+doesn't start with one of those four words.
+
+**The chunking is not optional**, and any other client (a Web Serial page, say) has to do
+the same. USB CDC looks reliable but isn't, end to end: the C3 driver's interrupt pushes
+received bytes into a fixed-size queue and drops whatever doesn't fit, with nothing to
+retransmit them. Pushing a 33 KB animation in one write lost two thirds of it — the losses
+land wherever the firmware is busy erasing flash — and even a single 1 KB burst lost 369
+bytes, because the queue is drained one byte at a time and the stock one holds 256. So the
+firmware enlarges that queue to 4 KB, a chunk is a quarter of it, and the next chunk waits
+for the `ACK` that says the last one reached flash. What this replaces is TCP, which was
+doing all of it invisibly.
+
+A PUT shows `UPDATING` on the OLED and blocks the motion loop for the transfer (~0.3 s).
 Validation before the rename means a dropped transfer can't corrupt the active slot.
 
 ## Files
 
 ```
 main.go        flags, library scan, HTTP API for the UI, proxy to the car
+serial.go      the car link: port auto-detect, reconnect, STATUS / GET / PUT
 profiles.go    display profile registry (embeds profiles.json)
 qgif.go        GIF -> .qgif conversion per profile (composite, box resize, pack) + preview render
 web/index.html the whole UI, embedded into the binary

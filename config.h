@@ -18,7 +18,7 @@
 
 // ---------- display profile ----------
 // One block per supported panel; exactly one enabled. DISP_PROFILE must match an id
-// in server/profiles.json — /status reports it and the server refuses mismatched pushes.
+// in server/profiles.json — STATUS reports it and the server refuses mismatched pushes.
 // Pixel formats (qgif codes): 0 = mono1 (1 bpp, MSB=left, bit 1=dark),
 // 1 = gray4 (2 px/byte, high nibble=left), 2 = rgb565 (2 B/px big-endian).
 #define DISP_PROFILE      "sh1106_128x64"
@@ -82,17 +82,19 @@
 #define ANIM_MIN_FRAME_MS 30  // floor for a frame delay read from the .qgif (0 in file → 100)
 #define PEAK_HOLD_MS      3000 // peak readout reset period — only used by the Serial telemetry
 
-// ---------- WiFi animation upload ----------
-// The car is a WiFi hotspot; the Go server (server/) pushes converted .qgif blobs to it.
-// One LittleFS file per CarState; a missing/invalid file falls back to the PROGMEM placeholder.
-#define WIFI_AP_SSID    "emocar"
-#define WIFI_AP_PASS    "emocar123"   // WPA2 needs >= 8 chars; "" makes an open network
-#define HTTP_PORT       80
+// ---------- USB animation upload ----------
+// The Go server (server/) opens the C3's USB serial port and pushes converted .qgif
+// blobs over it (cmd.cpp). One LittleFS file per CarState; a missing or invalid file
+// falls back to the PROGMEM placeholder. This replaced a WiFi AP + HTTP server whose
+// ~80-100 mA cost half the battery life — see PLANS.md.
 #define ANIM_PATH_FMT   "/anim%d.qgif"  // slot files: /anim0.qgif ... one per CarState
 #define ANIM_TMP_PATH   "/anim.tmp"     // upload target, renamed over the slot after validation
 #define ANIM_MAX_FRAMES 255
 #define ANIM_MAX_BYTES  (11UL + 2 * ANIM_MAX_FRAMES + (uint32_t)DISP_FRAME_BYTES * ANIM_MAX_FRAMES)
-#define NET_IO_TIMEOUT_MS 3000          // per-read deadline while receiving an upload
+#define SER_IO_TIMEOUT_MS 3000          // per-byte deadline during a transfer
+#define CMD_LINE_MAX      64            // longest command line accepted
+#define CMD_CHUNK         1024          // upload chunk; the car ACKs each one (see cmd.cpp)
+#define CMD_RX_BUF        4096          // ...and the USB RX queue must hold one, 4x over
 
 // ---------- motion state machine ----------
 // Four states (PLANS.md P2): NORMAL / FAST / DIZZY / HAPPY.

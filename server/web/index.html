@@ -238,7 +238,7 @@ async function poll() {
         setProfile(carProfileId, false);          // follow the car's display
       updateProfileWarn();
       $('cartext').textContent =
-        `online — state ${st.state}, heap ${(st.heap / 1024) | 0} KB, up ${st.uptime}s` +
+        `online on ${r.port} — state ${st.state}, heap ${(st.heap / 1024) | 0} KB, up ${st.uptime}s` +
         (st.profile ? `, display ${st.profile}` : '');
       STATES.forEach((s, i) => {
         const sl = st.slots[i];
@@ -249,7 +249,7 @@ async function poll() {
         $('card' + i).classList.toggle('live', st.state === s.name.toLowerCase());
       });
     } else {
-      $('cartext').textContent = 'offline — join the "emocar" WiFi network';
+      $('cartext').textContent = 'offline — ' + (r.error || 'plug the car in over USB');
     }
     return r.online;
   } catch { $('dot').classList.remove('on'); $('cartext').textContent = 'server error'; return false; }

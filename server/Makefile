@@ -1,13 +1,13 @@
 # emocar server — day-to-day targets. `make` alone lists them.
 #
-# Typical session (join the car's "emocar" WiFi first):
+# Typical session (plug the car in over USB first):
 #   make run          # build + start the UI on http://localhost:8080
 #   make status       # is the car there, which slots are loaded
 #   make assign STATE=2 GIF=hoamat.gif
 
 LISTEN    ?= :8080
 UI        ?= http://localhost:8080
-CAR       ?= http://192.168.4.1
+PORT      ?=                       # empty = let the server auto-detect the car
 
 JSON      := python3 -m json.tool
 
@@ -18,9 +18,9 @@ help:
 	@echo "run        build + serve the UI on $(UI)"
 	@echo "down       stop a running emocar-server"
 	@echo "open       open the UI in the browser"
-	@echo "status     ask the car what it is playing (needs the car's WiFi)"
+	@echo "status     ask the car what it is playing (needs the server running)"
 	@echo "assign     push one GIF: make assign STATE=2 GIF=hoamat.gif [PROFILE=sh1106_128x64] [THRESHOLD=128] [INVERT=1] [SCALE=fit] [DITHER=none]"
-	@echo "           (needs the server running and the car's WiFi)"
+	@echo "           (needs the server running)"
 	@echo "vet        go vet"
 	@echo "clean      remove the binary and dist/"
 	@echo "dist       cross-compile release archives into dist/ [VERSION=v0.1.0]"
@@ -28,8 +28,9 @@ help:
 build:
 	go build -o emocar-server .
 
+# The server owns the serial port while it runs, so `make down` before reflashing.
 run: build
-	./emocar-server -listen $(LISTEN)
+	./emocar-server -listen $(LISTEN) $(if $(PORT),-port $(PORT),)
 
 down:
 	@pkill -x emocar-server && echo "emocar-server stopped" || echo "emocar-server not running"
@@ -70,7 +71,7 @@ dist:
 # ---------------- talking to the car ----------------
 
 status:
-	@curl -sS -m 5 $(CAR)/status | $(JSON)
+	@curl -sS -m 10 $(UI)/api/car/status | $(JSON)
 
 # STATE=0..2 (NORMAL FAST SPINNING), GIF=<library name>; knobs optional.
 # PROFILE defaults to the first entry in profiles.json when empty.

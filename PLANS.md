@@ -465,7 +465,12 @@ only DIZZY. No modes, no profiles — one bool per slot.
 | `DELETE /config/<n>` | — | that state back to `config.h` defaults |
 | `GET /telemetry` | — | `rms`, `gx/gy/gz`, peaks, state |
 
-`PUT` takes **form encoding, not JSON**, on purpose: net.cpp parses it with
+**Transport note (2026-09-20):** these were HTTP routes, and WiFi is gone. They
+become commands on the serial link — `CONFIG`, `CONFIG <n> <fields>`, `TELEM` —
+framed exactly like `STATUS` / `GET` / `PUT` in `cmd.cpp`. Everything below is
+unchanged except the first word of each line.
+
+`PUT` takes **form encoding, not JSON**, on purpose: cmd.cpp parses it with
 `strtok`/`strtof` in a dozen lines, where accepting JSON means pulling in
 ArduinoJson for one endpoint. Responses stay JSON. Partial updates are the norm —
 send only the field being nudged. The slot-parsing in `handleClient` already
@@ -485,10 +490,10 @@ reject NaN, and **enforce `exit < enter`** on both hysteresis pairs. An inverted
 pair makes the state oscillate every single sample — it is the one config value
 that can make the car look broken, and it's easy to type by accident.
 
-**Explicitly not configurable:** pins, display profile, slot count, WiFi
-SSID/password. Rule: *nothing that can lock you out of the channel you'd use to
-fix it.* A bad motion config is always recoverable because the AP and the HTTP
-server never read it; bad WiFi creds are not.
+**Explicitly not configurable:** pins, display profile, slot count. Rule:
+*nothing that can lock you out of the channel you'd use to fix it.* A bad motion
+config is always recoverable because `cmd.cpp` never reads it — and the cable
+cannot be misconfigured at all, which is one more thing removing WiFi bought.
 
 **`GET /telemetry` is what makes tuning fast.** The server UI polls it at ~5 Hz
 and draws a rolling RMS trace with **the selected state's thresholds overlaid as
@@ -500,9 +505,9 @@ prerequisite.
 **Server UI: one card per state** in `server/web/index.html`, sitting next to the
 animation card for the same slot — face on the left, signal on the right, enable
 checkbox on the card header. It reaches the car through a new `/api/car/config`
-proxy in `server/main.go`, same shape as the existing `handleCarStatus`; the page
-is served from `localhost:8080` and the car is `192.168.4.1`, so it cannot call
-the car directly (CORS) — proxying is not optional.
+proxy in `server/main.go`, same shape as the existing `handleCarStatus`. The page
+cannot reach the car itself: the server holds the serial port open, so proxying is
+not optional.
 
 Rejected: **a generic trigger table** (`{state, axis, mode, a, b, holdMs, tailMs}`
 rows interpreted at runtime, so states are pure data). Tempting — un-parking
@@ -517,11 +522,11 @@ recompiling); the card view is what makes it pleasant.
 - [ ] `MotionCfg` = per-state blocks + globals; `config.h` macros → `*_DEF`
 - [ ] motion.cpp reads `cfg.*`; `enabled` flag skips a state in the want-chain
 - [ ] NVS blob load/save with `CFG_VERSION` guard, defaults on mismatch
-- [ ] `GET /config`, `PUT /config/<n>`, `PUT /config`, `DELETE /config/<n>` + validation
-- [ ] `GET /telemetry` + `gxyPeak` in Motion
+- [ ] `CONFIG` read / per-state write / globals write / reset commands + validation
+- [ ] `TELEM` command + `gxyPeak` in Motion
 - [ ] `/api/car/config` proxy in server/main.go
 - [ ] Per-state card in the web UI: fields, enable box, chart with threshold lines
-- [ ] Keep pins, profile, slots and WiFi compile-time — lockout risk
+- [ ] Keep pins, profile and slots compile-time — lockout risk
 
 ### P7 — A dead sensor looks exactly like a perfectly still car
 
@@ -600,19 +605,43 @@ say so (`! gyro recovered`). Two observed signatures, both now covered — a har
   it replaces the GY-50, so swap *before* the P5 tuning session if any of those is
   wanted soon — thresholds tuned on the L3G4200D don't carry over; otherwise defer
   freely.
-- **Battery** — planned, currently wired. Warning planted now: WiFi AP mode can't
-  modem-sleep (~80–100 mA floor). The power ladder (display off + gyro low-power →
-  AP off after long idle) is the real reason to un-park SLEEP; until then nothing
-  turns anything off. Don't design anything that assumes the AP is always up.
+- **Battery** — planned, currently wired. The ~80–100 mA floor this used to warn
+  about was the WiFi AP, which can't modem-sleep; the AP is gone (2026-09-20, see
+  below), so the car now draws only what the C3 + OLED + gyro draw. The power ladder
+  is down to display off + gyro low-power, which is why SLEEP stays parked.
 
 ---
 
 # GIF upload tool for ESP32 devices
 
-Where the `server/` tool is headed. Decided 2026-09-01.
+Where the `server/` tool is headed. Decided 2026-09-01; transport settled 2026-09-20.
 
-**Now (local testing): Option A — desktop Go binary.**
+**Now (local testing): Option A — desktop Go binary, over the USB cable.**
 **Production (when we need real users): Option C — cloud static page + Web Serial.**
+
+## WiFi removed — the cable is the only link (2026-09-20)
+
+The car was a WiFi AP running a hand-rolled HTTP server (`net.cpp`). Both are gone;
+`cmd.cpp` does the same three operations over the USB serial port, which is Option C
+step 2 below brought forward.
+
+Why: the AP cost ~80–100 mA it could never sleep off — half the life of a 200 mAh
+cell — and it cost whoever pushed a GIF their internet connection, on a device that
+has to be plugged in to be reflashed anyway. Nothing about the upload needed to be
+wireless.
+
+Measured: firmware 1,160,192 B → 486,360 B, 88% → 37% of a 1.25 MB app slot.
+
+What it settles:
+
+- **Flash split** — parked. It only mattered for OTA, and OTA needed WiFi.
+- **Portable networking** (saved SSIDs + AP fallback, per-car mDNS name, setup
+  portal, OTA + rollback, safe mode) — dropped before any of it was built.
+- **P6 telemetry over the air** — not possible now. Tuning becomes a desk loop: plug
+  in, read, unplug, shake, plug back in. Shake and hold still can't be watched live,
+  since the USB connector drops out when the car is shaken.
+- **Wireless again, if ever wanted** — only through the deferred cloud relay (D
+  below). Re-adding an AP is not the answer; it is what was just removed.
 
 The goal is a tool *any* ESP32 owner can use to push styled GIFs (zoom/pan/threshold/
 dither) to their device. emocar is the first supported device, not the only one.
@@ -620,7 +649,7 @@ dither) to their device. emocar is the first supported device, not the only one.
 ## Option A — desktop Go binary (current)
 
 What we have in `server/`: Go binary, UI embedded, converts GIF → `.qgif`, pushes to
-the car over its WiFi AP (`PUT http://192.168.4.1/anim/<n>`).
+the car over the USB serial port (`serial.go`, auto-detecting the Espressif VID).
 
 Used for local testing as-is. When it moves to its own repo, the packaging pass is:
 
@@ -632,12 +661,12 @@ Used for local testing as-is. When it moves to its own repo, the packaging pass 
 - [ ] Cross-compile releases (windows/amd64, darwin/arm64, linux/amd64)
 - [ ] De-emocar the code: `-car`/`carURL`/`/api/car/*` → "device"; slot count and
       names from the device's `/status`, not hardcoded `0..2`
-- [ ] Publish `DEVICE_API.md`: `GET /status`, `GET|PUT /anim/<n>`, `.qgif` container
+- [ ] Publish `DEVICE_API.md`: `STATUS`, `GET <n>`, `PUT <n> <len>`, `.qgif` container
       spec (v2, see `server/README.md`)
 
 Known friction (accepted for now): download + unsigned-binary warnings
-(SmartScreen/Gatekeeper), stale copies in the wild, users must download before
-joining the car's AP (no internet on the AP).
+(SmartScreen/Gatekeeper), stale copies in the wild, and the server owning the serial
+port — it has to be stopped before the car can be reflashed.
 
 ## Option C — cloud page + Web Serial (production target)
 
@@ -659,9 +688,12 @@ Build steps, in order (each is independently useful):
 1. [ ] Compile `qgif.go` to WASM; static page with file picker, embedded starter
        library, local previews (all tune knobs run in-browser — no round trips).
        Deployable to Pages immediately as a converter-only tool.
-2. [ ] Firmware: serial protocol mirroring the HTTP API — length-prefixed frames
-       `STATUS` / `PUT <slot> <len> <qgif bytes>` / `GET <slot>`, reusing net.cpp's
-       validate-to-temp-then-rename path (~150 lines, shared with HTTP handlers)
+2. [x] Firmware: serial protocol — `STATUS` / `PUT <slot> <len> <qgif bytes>` /
+       `GET <slot>`, keeping net.cpp's validate-to-temp-then-rename path. **Done
+       2026-09-20** as `cmd.cpp`; it replaced the HTTP API rather than joining it.
+       One thing the plan didn't foresee: the payload must be chunked and ACKed,
+       because USB CDC drops what doesn't fit the driver's RX queue and nothing
+       retransmits it. Step 3 below inherits that — see `server/README.md`.
 3. [ ] Wire Web Serial into the page (port picker, transfer progress)
 4. [ ] Deploy to Cloudflare Pages as the primary tool; binary (A) stays as the
        fallback for Firefox/Safari users

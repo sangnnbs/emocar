@@ -1,8 +1,8 @@
 // emocar-server — web UI on the PC that converts emoji GIFs to .qgif and
-// pushes them to the car over its WiFi hotspot. See README.md.
+// pushes them to the car over its USB cable (see serial.go). See README.md.
 //
-//	./emocar-server                  # http://localhost:8080, car at 192.168.4.1
-//	./emocar-server -car http://192.168.4.1 -listen :8080 -lib ../emoji_lib,../downloads/00_Main,../gifs
+//	./emocar-server                  # http://localhost:8080, car auto-detected
+//	./emocar-server -port /dev/ttyACM0 -listen :8080 -lib ../emoji_lib,../downloads/00_Main,../gifs
 package main
 
 import (
@@ -18,17 +18,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 //go:embed web/index.html
 var indexHTML []byte
 
 var (
-	carURL     string
+	car        *carLink
 	libDirs    []string
 	uploadsDir string
-	carClient  = &http.Client{Timeout: 15 * time.Second}
 )
 
 // ---------------------------------------------------------------- assignments
@@ -204,39 +202,22 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCarStatus(w http.ResponseWriter, r *http.Request) {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(carURL + "/status")
+	status, err := car.Status()
 	if err != nil {
 		writeJSON(w, map[string]any{"online": false, "error": err.Error()})
 		return
 	}
-	defer resp.Body.Close()
-	var status any
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		writeJSON(w, map[string]any{"online": false, "error": "bad status payload"})
-		return
-	}
-	writeJSON(w, map[string]any{"online": true, "status": status})
+	writeJSON(w, map[string]any{"online": true, "port": car.Port(), "status": status})
 }
 
 // GET /api/car/preview/{slot} — what the car currently plays, rendered for the browser.
 func handleCarPreview(w http.ResponseWriter, r *http.Request) {
-	slot := strings.TrimPrefix(r.URL.Path, "/api/car/preview/")
-	if n, err := strconv.Atoi(slot); err != nil || n < 0 || n >= numStates {
+	n, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/car/preview/"))
+	if err != nil || n < 0 || n >= numStates {
 		jsonErr(w, 404, "bad slot")
 		return
 	}
-	resp, err := carClient.Get(carURL + "/anim/" + slot)
-	if err != nil {
-		jsonErr(w, 502, "car unreachable: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		jsonErr(w, resp.StatusCode, "placeholder in use")
-		return
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20)) // any profile's worst case
+	data, err := car.Get(n)
 	if err != nil {
 		jsonErr(w, 502, err.Error())
 		return
@@ -304,22 +285,8 @@ func handleAssign(w http.ResponseWriter, r *http.Request) {
 	}
 	blob := a.EncodeQGIF()
 
-	put, err := http.NewRequest(http.MethodPut,
-		fmt.Sprintf("%s/anim/%d", carURL, req.State), strings.NewReader(string(blob)))
-	if err != nil {
-		jsonErr(w, 500, err.Error())
-		return
-	}
-	put.ContentLength = int64(len(blob))
-	resp, err := carClient.Do(put)
-	if err != nil {
-		jsonErr(w, 502, "car unreachable: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		jsonErr(w, 502, fmt.Sprintf("car said %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+	if err := car.Put(req.State, blob); err != nil {
+		jsonErr(w, 502, err.Error())
 		return
 	}
 	assignments[req.State] = &assignRec{Name: req.Name, Frames: len(a.Bitmaps), Bytes: len(blob)}
@@ -369,14 +336,14 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	listen := flag.String("listen", ":8080", "web UI address")
-	car := flag.String("car", "http://192.168.4.1", "car base URL (WiFi AP mode default)")
+	port := flag.String("port", "", "car serial port (default: auto-detect an Espressif USB device)")
 	// ../gifs is deliberately NOT in the default: it holds renamed copies of
 	// emoji_lib files (mkanim placeholder sources), which put the same animation
 	// in the library under two names and made assignments look duplicated.
 	lib := flag.String("lib", "../emoji_lib,../downloads/00_Main", "comma-separated GIF library dirs")
 	uploads := flag.String("uploads", "../downloads/uploads", "where browser uploads are stored")
 	flag.Parse()
-	carURL = strings.TrimRight(*car, "/")
+	car = newCarLink(*port)
 	libDirs = strings.Split(*lib, ",")
 	uploadsDir = *uploads
 	loadProfiles()
@@ -399,6 +366,10 @@ func main() {
 	http.HandleFunc("/api/assignments", handleAssignments)
 	http.HandleFunc("/api/upload", handleUpload)
 
-	log.Printf("emocar server on %s, car at %s, library: %s", *listen, carURL, *lib)
+	where := *port
+	if where == "" {
+		where = "auto-detect"
+	}
+	log.Printf("emocar server on %s, car port %s, library: %s", *listen, where, *lib)
 	log.Fatal(http.ListenAndServe(*listen, nil))
 }
