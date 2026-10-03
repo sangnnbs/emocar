@@ -42,6 +42,11 @@ Plug the car in over USB. The server finds it by its Espressif USB id (VID `303A
 ESP32 is attached. Other flags: `-listen`, `-lib` (comma-separated library dirs),
 `-uploads` (where browser-added GIFs are saved).
 
+**GIF folder.** By default both the library and uploads are a `gifs` folder next to the
+binary, created on first start — e.g. `C:\emocar\emocar-server.exe` uses `C:\emocar\gifs\`,
+however it was started. Drop `.gif`/`.qgif` files there, or use **+ add GIF**. `make run`
+overrides this with the repo's dev libraries (`DEV_LIB`, `DEV_UPLOADS` in the Makefile).
+
 **The server holds the port open**, so it must be stopped before reflashing the car —
 `make down`, flash, `make run`. It reconnects by itself whenever the cable is unplugged
 and plugged back in. It never asserts DTR/RTS: on the C3 those lines are esptool's reset
@@ -65,7 +70,8 @@ sequence, so touching them would reboot the car every time the server connected.
   additionally get threshold / invert / dither (`none` / `bayer` / `floyd`) knobs.
   Then **Send to car**.
   Ready-made `.qgif` files are sent as-is, no knobs.
-- **+ add GIF** copies a new file into `../downloads/uploads/` and it appears in the library.
+- **+ add GIF** copies a new file into the uploads folder (`gifs/` next to the binary by
+  default) and it appears in the library.
 
 The car stores only the four active animations (LittleFS `/anim0..3.qgif`); the library
 never leaves the PC. Uploads survive power cycles and firmware reflashes.

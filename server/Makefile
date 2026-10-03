@@ -29,8 +29,14 @@ build:
 	go build -o emocar-server .
 
 # The server owns the serial port while it runs, so `make down` before reflashing.
+# The binary's default library is gifs/ next to it (the layout a user unzips); in the repo
+# the dev libraries live one level up, so name them. ../gifs is deliberately NOT in the
+# list: it holds renamed copies of emoji_lib files (mkanim placeholder sources), which put
+# the same animation in the library under two names and made assignments look duplicated.
+DEV_LIB     ?= ../emoji_lib,../downloads/00_Main
+DEV_UPLOADS ?= ../downloads/uploads
 run: build
-	./emocar-server -listen $(LISTEN) $(if $(PORT),-port $(PORT),)
+	./emocar-server -listen $(LISTEN) $(if $(PORT),-port $(PORT),) -lib $(DEV_LIB) -uploads $(DEV_UPLOADS)
 
 down:
 	@pkill -x emocar-server && echo "emocar-server stopped" || echo "emocar-server not running"

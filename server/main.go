@@ -1,8 +1,8 @@
 // emocar-server — web UI on the PC that converts emoji GIFs to .qgif and
 // pushes them to the car over its USB cable (see serial.go). See README.md.
 //
-//	./emocar-server                  # http://localhost:8080, car auto-detected
-//	./emocar-server -port /dev/ttyACM0 -listen :8080 -lib ../emoji_lib,../downloads/00_Main,../gifs
+//	./emocar-server                  # http://localhost:8080, car auto-detected, GIFs in ./gifs
+//	./emocar-server -port /dev/ttyACM0 -listen :8080 -lib ../emoji_lib,../downloads/00_Main
 package main
 
 import (
@@ -334,18 +334,36 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 // ---------------------------------------------------------------- main
 
+// gifsDir is the default library + uploads folder: "gifs" next to the binary, so
+// C:\emocar\emocar-server.exe reads and writes C:\emocar\gifs no matter how it was
+// started. Relative to the working directory would move with it — a double-click and a
+// terminal in another folder would each see a different (usually empty) library.
+func gifsDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "gifs"
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	return filepath.Join(filepath.Dir(exe), "gifs")
+}
+
 func main() {
+	gifs := gifsDir()
 	listen := flag.String("listen", ":8080", "web UI address")
 	port := flag.String("port", "", "car serial port (default: auto-detect an Espressif USB device)")
-	// ../gifs is deliberately NOT in the default: it holds renamed copies of
-	// emoji_lib files (mkanim placeholder sources), which put the same animation
-	// in the library under two names and made assignments look duplicated.
-	lib := flag.String("lib", "../emoji_lib,../downloads/00_Main", "comma-separated GIF library dirs")
-	uploads := flag.String("uploads", "../downloads/uploads", "where browser uploads are stored")
+	lib := flag.String("lib", gifs, "comma-separated GIF library dirs")
+	uploads := flag.String("uploads", gifs, "where browser uploads are stored")
 	flag.Parse()
 	car = newCarLink(*port)
 	libDirs = strings.Split(*lib, ",")
 	uploadsDir = *uploads
+	// Create it up front, so a first-time user finds the folder to drop GIFs into
+	// before ever pressing "+ add GIF".
+	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+		log.Printf("cannot create %s: %v", uploadsDir, err)
+	}
 	loadProfiles()
 	loadAssignments()
 
@@ -370,6 +388,6 @@ func main() {
 	if where == "" {
 		where = "auto-detect"
 	}
-	log.Printf("emocar server on %s, car port %s, library: %s", *listen, where, *lib)
+	log.Printf("emocar server on %s, car port %s, library: %s, uploads: %s", *listen, where, *lib, uploadsDir)
 	log.Fatal(http.ListenAndServe(*listen, nil))
 }
