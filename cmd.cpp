@@ -1,10 +1,5 @@
-// cmd.cpp — the animation upload link. A command line, then a fixed-length raw
-// payload: the serial equivalent of Content-Length, and for the same reason — a
-// .qgif is streamed straight to LittleFS, never buffered in RAM.
-//
-// A command is served start to finish inside cmdPoll(), so nothing here can
-// interleave with the telemetry printing. The host still skips telemetry lines: one
-// can be printed between its command and the reply.
+// cmd.cpp — the animation upload link. Payloads are streamed straight to LittleFS,
+// never buffered in RAM.
 #include <Arduino.h>
 #include <LittleFS.h>
 #include "config.h"
@@ -15,7 +10,7 @@
 static void replyErr(const char *msg) { Serial.printf("ERR %s\n", msg); }
 
 static void handleStatus() {
-  char body[560];   // header + one object per CarState
+  char body[560];
   int len = snprintf(body, sizeof body,
                      "{\"state\":\"%s\",\"heap\":%lu,\"uptime\":%lu,"
                      "\"profile\":\"%s\",\"w\":%d,\"h\":%d,\"format\":\"%s\",\"slots\":[",
@@ -34,16 +29,15 @@ static void handleStatus() {
 }
 
 static void handleGetAnim(int slot) {
-  char path[24]; snprintf(path, sizeof path, ANIM_PATH_FMT, slot);
-  File f = LittleFS.open(path, "r");
   uint16_t frames; uint32_t bytes;
-  if (!f || !animSlotInfo(slot, frames, bytes)) {
-    if (f) f.close();
+  char path[24]; animSlotPath(slot, path, sizeof path);
+  File f;
+  if (!animSlotInfo(slot, frames, bytes) || !(f = LittleFS.open(path, "r"))) {
     replyErr("placeholder in use");
     return;
   }
-  // setup()'s zero TX timeout keeps a car with no terminal from stalling in printf,
-  // but it drops bytes on a payload this size. Let this one wait for the host.
+  // The TX timeout is 0 so telemetry never stalls the loop, but that drops bytes on a
+  // payload this size.
   Serial.setTxTimeoutMs(SER_IO_TIMEOUT_MS);
   Serial.printf("OK %lu\n", (unsigned long)f.size());
   uint8_t buf[512];
@@ -54,6 +48,47 @@ static void handleGetAnim(int slot) {
   f.close();
 }
 
+// Receive into ANIM_TMP_PATH. Returns false with `err` filled on failure.
+//
+// One chunk in flight, ACKed only once it is on flash: the USB CDC driver drops whatever
+// doesn't fit its RX queue, and nothing retransmits it.
+static bool receivePayload(long payloadLen, char *err, size_t errLen) {
+  LittleFS.remove(ANIM_TMP_PATH);
+  File f = LittleFS.open(ANIM_TMP_PATH, "w");
+  if (!f) { snprintf(err, errLen, "open tmp failed"); return false; }
+
+  Serial.printf("READY %d\n", CMD_CHUNK);
+  Serial.setTimeout(SER_IO_TIMEOUT_MS);
+
+  uint8_t buf[CMD_CHUNK];
+  long got = 0;
+  while (got < payloadLen) {
+    size_t want = min((long)CMD_CHUNK, payloadLen - got);
+    size_t n = Serial.readBytes(buf, want);
+    if (n != want) {
+      f.close();
+      snprintf(err, errLen, "short transfer: %ld of %ld bytes (chunk gave %u of %u)",
+               got, payloadLen, (unsigned)n, (unsigned)want);
+      return false;
+    }
+    if (f.write(buf, n) != n) {
+      f.close();
+      snprintf(err, errLen, "flash write failed at %ld of %ld bytes", got, payloadLen);
+      return false;
+    }
+    got += n;
+    Serial.printf("ACK %ld\n", got);
+  }
+  f.close();
+
+  QgifInfo info; uint32_t size;
+  if (!qgifCheckFile(ANIM_TMP_PATH, info, size) || size != (uint32_t)payloadLen) {
+    snprintf(err, errLen, "not a %dx%d %s qgif", DISP_W, DISP_H, dispFormatName());
+    return false;
+  }
+  return true;
+}
+
 static void handlePutAnim(int slot, long payloadLen) {
   if (payloadLen < QGIF_HDR_MAX + 2 + DISP_FRAME_BYTES || (unsigned long)payloadLen > ANIM_MAX_BYTES) {
     replyErr("bad length");
@@ -61,62 +96,21 @@ static void handlePutAnim(int slot, long payloadLen) {
   }
   animMessage("UPDATING", "receiving anim", carStateName((CarState)slot));
 
-  LittleFS.remove(ANIM_TMP_PATH);
-  File f = LittleFS.open(ANIM_TMP_PATH, "w");
-  if (!f) { replyErr("open tmp failed"); return; }
-
-  // One chunk in flight, ACKed only once it is on flash. USB CDC is not reliable end
-  // to end: the driver's ISR drops whatever doesn't fit its RX queue and nothing
-  // retransmits it. Measured — 33 KB sent at once lost two thirds while LittleFS
-  // erased, and even a lone 1 KB burst lost 369 bytes into the stock 256-byte queue.
-  Serial.printf("READY %d\n", CMD_CHUNK);
-  Serial.setTimeout(SER_IO_TIMEOUT_MS);   // readBytes gives each byte its own deadline
-
-  uint8_t buf[CMD_CHUNK];
-  long got = 0;
-  size_t shortRead = 0, shortWant = 0;
-  bool ok = true;
-  while (got < payloadLen) {
-    size_t want = min((long)CMD_CHUNK, payloadLen - got);
-    size_t n = Serial.readBytes(buf, want);
-    if (n != want) { ok = false; shortRead = n; shortWant = want; break; }  // host went quiet
-    if (f.write(buf, n) != n) { ok = false; break; }        // out of flash space
-    got += n;
-    Serial.printf("ACK %ld\n", got);                        // ...now the host may send more
-  }
-  f.close();
-
   char err[96];
-  if (!ok) {
-    snprintf(err, sizeof err, "short transfer: %ld of %ld bytes (chunk gave %u of %u)",
-             got, payloadLen, (unsigned)shortRead, (unsigned)shortWant);
-  } else {
-    // Validate before touching the live slot: geometry and pixel format must match
-    // this build's display profile, and the size must be consistent.
-    File t = LittleFS.open(ANIM_TMP_PATH, "r");
-    uint8_t hdr[QGIF_HDR_MAX];
-    QgifInfo info;
-    ok = t && t.read(hdr, sizeof hdr) == sizeof hdr &&
-         t.size() == (size_t)payloadLen && qgifParse(hdr, t.size(), info);
-    if (t) t.close();
-    if (!ok) snprintf(err, sizeof err, "not a %dx%d %s qgif",
-                      DISP_W, DISP_H, dispFormatName());
-  }
-
-  if (!ok) {
+  if (!receivePayload(payloadLen, err, sizeof err)) {
     LittleFS.remove(ANIM_TMP_PATH);
     replyErr(err);
     return;
   }
 
-  char path[24]; snprintf(path, sizeof path, ANIM_PATH_FMT, slot);
+  char path[24]; animSlotPath(slot, path, sizeof path);
   LittleFS.remove(path);
   if (!LittleFS.rename(ANIM_TMP_PATH, path)) {
     replyErr("rename failed");
     return;
   }
   animReload(slot);
-  Serial.printf("OK %ld\n", got);
+  Serial.printf("OK %ld\n", payloadLen);
 }
 
 static void handleLine(char *line) {
@@ -125,7 +119,6 @@ static void handleLine(char *line) {
   long len = 0;
   int fields = sscanf(line, "%7s %d %ld", verb, &slot, &len);
 
-  bool wasMessage = false;
   if (fields >= 1 && !strcmp(verb, "STATUS")) {
     handleStatus();
   } else if (slot < 0 || slot >= CAR_STATE_COUNT) {
@@ -134,12 +127,10 @@ static void handleLine(char *line) {
     handleGetAnim(slot);
   } else if (fields == 3 && !strcmp(verb, "PUT")) {
     handlePutAnim(slot, len);
-    wasMessage = true;
+    animShow(motionGet().state);       // leave the UPDATING screen
   } else {
     replyErr("unknown command");
   }
-
-  if (wasMessage) animShow(motionGet().state);   // leave the UPDATING screen
 }
 
 void cmdPoll() {
@@ -156,6 +147,6 @@ void cmdPoll() {
     line[len] = 0;
     len = 0;
     handleLine(line);
-    return;                            // one command per loop — let the FIFO drain
+    return;                            // one command per loop
   }
 }

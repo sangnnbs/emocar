@@ -1,7 +1,4 @@
-// motion.cpp — vibration RMS + the four-state machine (PLANS.md P2).
-//
-// Two condition flags feed one want-chain. Each condition owns its own hysteresis
-// so the chain itself stays a straight priority list:
+// motion.cpp — vibration RMS + the four-state machine.
 //
 //   want = handCtx     -> HAPPY      in a hand: nothing else applies
 //        : spin        -> DIZZY      a real spin on the floor
@@ -9,11 +6,8 @@
 //        : fast        -> FAST
 //        :                NORMAL
 //
-// The context bit decides the *situation* before any threshold is consulted, and being
-// held is the whole answer: while in a hand the car is simply happy. That is what makes
-// the remaining thresholds tractable — FAST and DIZZY only ever have to describe a car on
-// a surface, so neither has to be chosen to avoid being tripped by handling. Separating
-// handling from shaking by magnitude is what could never be made to work.
+// Each condition owns its hysteresis. An unregistered state (STATE_* in config.h) falls
+// through to NORMAL; in a hand that is NORMAL too, never FAST or DIZZY.
 #include <Arduino.h>
 #include <math.h>
 #include "config.h"
@@ -22,54 +16,72 @@
 static const char *NAMES[] = { "NORMAL", "FAST", "DIZZY", "HAPPY" };
 const char *carStateName(CarState s) { return NAMES[s]; }
 
-// Where each state sits on the ladder: HAPPY > DIZZY > FAST > NORMAL. Kept separate from
-// the enum because the enum is *slot order* and must stay append-only. HAPPY is on top
-// because it is not an intensity at all — it is the car reporting *where it is*, and that
-// outranks anything it might otherwise say about how it is moving.
-// Currently identical to the enum order, which is a coincidence worth keeping the map
-// for: slots are append-only, so the next state added (STARTLED, say) would sit above
-// FAST at slot 4 and break the coincidence immediately.
+// Ladder rank per state. Separate from the enum, which is slot order and append-only.
 static const uint8_t PRIORITY[] = { 0, 1, 2, 3 };   // NORMAL, FAST, DIZZY, HAPPY
 
 static const float SAMPLE_S = SAMPLE_US / 1000000.0f;
 
 static Motion  m;
 static float   biasX, biasY, biasZ;
-static float   rmsBuf[RMS_WINDOW]; static int rmsIdx; static float rmsSum;
-static float   xBuf[RMS_WINDOW], yBuf[RMS_WINDOW], zBuf[RMS_WINDOW];   // per-axis means
-static float   xSum, ySum, zSum;
-static uint32_t restSince;              // how long jitter has been at rest level
-static uint32_t peakSince, rateSince, sampleCount;
-static CarState candidate; static uint32_t condSince;
+
+// sliding window: squared magnitude and per-axis values, with running sums
+static float   sqBuf[RMS_WINDOW], xBuf[RMS_WINDOW], yBuf[RMS_WINDOW], zBuf[RMS_WINDOW];
+static float   sqSum, xSum, ySum, zSum;
+static int     winIdx;
+
+static uint32_t restSince;
+static CarState candidate; static uint32_t candidateSince;
 
 static bool     spinCond, fastCond;
+static uint32_t fastSince;
 static int      spinDir; static uint32_t spinSince;
-static float    dose;                     // Σ|gz|·dt while spinning, i.e. degrees spun
-static uint32_t dizzyUntil;               // wooze deadline armed when the spin stops
-static uint32_t rollSince, stillSince, quietSince;   // context-bit windows
-static bool     doseActive;               // the spin was running on the last sample
+static float    dose;                     // degrees spun during the current spin
+static bool     doseActive;
+static uint32_t dizzyUntil;
+static uint32_t rollSince, stillSince, quietSince, rollHoldSince;
+
+static GyroRaw  h1, h2;                   // the two raw samples before this one
+static int      histN;
+
+static int16_t med3(int16_t a, int16_t b, int16_t c) {
+  return a < b ? (b < c ? b : (a < c ? c : a))
+               : (a < c ? a : (b < c ? c : b));
+}
+
+static GyroRaw despike(const GyroRaw &raw) {
+#if DESPIKE_MEDIAN3
+  GyroRaw out = raw;
+  if (histN >= 2) {
+    out.x = med3(h2.x, h1.x, raw.x);
+    out.y = med3(h2.y, h1.y, raw.y);
+    out.z = med3(h2.z, h1.z, raw.z);
+  } else histN++;
+  h2 = h1; h1 = raw;          // keep raw history so a spike can't influence later output
+  return out;
+#else
+  return raw;
+#endif
+}
 
 void motionSetBias(float bx, float by, float bz) { biasX = bx; biasY = by; biasZ = bz; }
-void motionGetBias(float &bx, float &by, float &bz) { bx = biasX; by = biasY; bz = biasZ; }
 
-// Median per axis, then keep the blocks within CALIB_AGREE_DPS of it on every axis. The
-// median is what makes a tap harmless: it cannot move it without spoiling half the window.
-// The bias is the mean of the agreeing blocks only, so the spoiled ones leave no trace.
+// Median per axis, then the bias is the mean of the blocks within CALIB_AGREE_DPS of it
+// on every axis.
 bool motionCalibFit(const float blk[][3], int n, float bias[3], int &agree) {
+  if (n > CALIB_BLOCKS) n = CALIB_BLOCKS;
   float med[3];
   for (int a = 0; a < 3; a++) {
     float v[CALIB_BLOCKS];
-    int m = n < CALIB_BLOCKS ? n : CALIB_BLOCKS;
-    for (int i = 0; i < m; i++) {                 // insertion sort, n is ~15
+    for (int i = 0; i < n; i++) {                 // insertion sort
       float x = blk[i][a]; int j = i;
       for (; j > 0 && v[j - 1] > x; j--) v[j] = v[j - 1];
       v[j] = x;
     }
-    med[a] = v[m / 2];
+    med[a] = v[n / 2];
   }
   double sum[3] = { 0, 0, 0 };
   agree = 0;
-  for (int i = 0; i < n && i < CALIB_BLOCKS; i++) {
+  for (int i = 0; i < n; i++) {
     bool ok = true;
     for (int a = 0; a < 3; a++) ok = ok && fabsf(blk[i][a] - med[a]) <= CALIB_AGREE_DPS;
     if (!ok) continue;
@@ -82,28 +94,31 @@ bool motionCalibFit(const float blk[][3], int n, float bias[3], int &agree) {
 }
 
 void motionReset() {
+  uint32_t now = millis();
   m = Motion{};
-  for (int i = 0; i < RMS_WINDOW; i++) rmsBuf[i] = xBuf[i] = yBuf[i] = zBuf[i] = 0;
-  rmsIdx = 0; rmsSum = xSum = ySum = zSum = 0; sampleCount = 0;
-  peakSince = rateSince = condSince = rollSince = stillSince = quietSince = millis();
-  restSince = millis();
+  for (int i = 0; i < RMS_WINDOW; i++) sqBuf[i] = xBuf[i] = yBuf[i] = zBuf[i] = 0;
+  sqSum = xSum = ySum = zSum = 0; winIdx = 0;
+  restSince = candidateSince = now;
   candidate = NORMAL;
   spinCond = fastCond = false;
-  spinDir = 0; spinSince = millis();
-  dose = 0; dizzyUntil = millis(); doseActive = false;
+  fastSince = spinSince = dizzyUntil = now;
+  spinDir = 0;
+  dose = 0; doseActive = false;
+  rollSince = stillSince = quietSince = rollHoldSince = now;
+  h1 = h2 = GyroRaw{}; histN = 0;
 }
 
 const Motion &motionGet() { return m; }
 
-void motionTick() {
-  if (millis() - rateSince >= 1000) {
-    rateSince = millis();
-    m.sampleRate = sampleCount; sampleCount = 0;
-  }
+// Enter only after FAST_HOLD_MS of continuous loudness (a tap never lasts); leave on
+// level alone — EXIT_HOLD_MS decides how long the face stays.
+static void updateFast(uint32_t now) {
+  if (fastCond) { if (m.rms <= FAST_EXIT_RMS) fastCond = false; return; }
+  if (m.rms <= FAST_ENTER_RMS) { fastSince = now; return; }
+  if (now - fastSince >= FAST_HOLD_MS) fastCond = true;
 }
 
-// A real spin holds one direction, which a wobble or a bump cannot fake. Leaving takes
-// slowing down, not a sign flip — otherwise every wobble mid-spin would end the state.
+// Enter on one sign held; leave on slowing down, not on a sign flip.
 static void updateSpin(uint32_t now) {
   float az  = fabsf(m.gz);
   int   dir = (m.gz > 0) - (m.gz < 0);
@@ -115,15 +130,8 @@ static void updateSpin(uint32_t now) {
   if (now - spinSince >= SPIN_HOLD_MS) spinCond = true;
 }
 
-// Floor -> hand on roll travel, hand -> floor on stillness. Sticky on purpose: holding
-// the car level for a moment must not read as putting it down.
-//
-// Travel is unsigned. A signed angle cancels itself out — turning the car over and back
-// nets zero, yet it is still a thing only a hand can do. And the accumulator survives
-// quiet *samples*: gy crosses zero several times a second during real handling, so
-// clearing on the first quiet sample wiped the gesture before it ever reached the
-// threshold (measured: 8 s of handling never got past 5 deg). Only a continuously quiet
-// HAND_QUIET_MS — the car lying flat, not a direction change — clears it.
+// Floor -> hand on unsigned roll travel, hand -> floor on stillness. The accumulator
+// survives zero-crossings; only HAND_QUIET_MS of continuous quiet clears it.
 static void updateContext(uint32_t now) {
   if (m.handCtx) {
     if (m.rms > STILL_RMS) stillSince = now;
@@ -132,20 +140,19 @@ static void updateContext(uint32_t now) {
   }
   if (fabsf(m.gy) >= HAND_QUIET_DPS) {
     quietSince = now;
-    if (now - rollSince > HAND_TILT_MS) { m.rollAcc = 0; rollSince = now; }   // window expired
-    m.rollAcc += fabsf(m.gy) * SAMPLE_S;                                      // dps * s = degrees
+    if (now - rollSince > HAND_TILT_MS) { m.rollAcc = 0; rollSince = now; }
+    if (now - rollHoldSince >= HAND_ROLL_MS) m.rollAcc += fabsf(m.gy) * SAMPLE_S;
     if (m.rollAcc >= HAND_TILT_DEG) { m.handCtx = true; stillSince = now; }
-  } else if (now - quietSince >= HAND_QUIET_MS) {   // lying flat, not just passing through 0
-    m.rollAcc = 0; rollSince = now;
+  } else {
+    rollHoldSince = now;
+    if (now - quietSince >= HAND_QUIET_MS) { m.rollAcc = 0; rollSince = now; }
   }
 }
 
-// Dose is the whole aftermath mechanism: accumulate the rotation while it is happening,
-// spend it as screen time when it stops. Spin longer or faster -> dizzier for longer.
+// Accumulate degrees while spinning, spend them as wooze time when the spin stops.
 static void updateDizzyDose(uint32_t now) {
-  bool active = spinCond;
-  if (active) {
-    dose += fabsf(m.gz) * SAMPLE_S;       // degrees actually spun
+  if (spinCond) {
+    dose += fabsf(m.gz) * SAMPLE_S;
   } else if (doseActive) {
     uint32_t ms = (uint32_t)(dose * DIZZY_MS_PER_DEG);
     if (ms < DIZZY_MIN_MS) ms = DIZZY_MIN_MS;
@@ -153,66 +160,58 @@ static void updateDizzyDose(uint32_t now) {
     dizzyUntil = now + ms;
     dose = 0;
   }
-  doseActive = active;
+  doseActive = spinCond;
 }
 
 static bool updateState(uint32_t now) {
-  updateSpin(now);
-  updateContext(now);
-  updateDizzyDose(now);
-  fastCond = fastCond ? (m.rms > FAST_EXIT_RMS) : (m.rms > FAST_ENTER_RMS);
+  // Plain ifs, not #if, so disabled states keep compiling.
+  if (STATE_DIZZY) { updateSpin(now); updateDizzyDose(now); }
+  if (USE_GYRO) updateContext(now);
+  if (STATE_FAST) updateFast(now);
 
-  CarState want = m.handCtx                        ? HAPPY   // in a hand: that is the answer
-                : spinCond                         ? DIZZY
-                : (int32_t)(now - dizzyUntil) < 0  ? DIZZY   // aftermath, ∝ degrees spun
-                : fastCond                         ? FAST
+  CarState want = m.handCtx                        ? (STATE_HAPPY ? HAPPY : NORMAL)
+                : STATE_DIZZY && spinCond          ? DIZZY
+                : STATE_DIZZY && (int32_t)(now - dizzyUntil) < 0 ? DIZZY
+                : STATE_FAST && fastCond           ? FAST
                 :                                    NORMAL;
 
-  if (want != candidate) { candidate = want; condSince = now; }
+  if (want != candidate) { candidate = want; candidateSince = now; }
   if (candidate == m.state) return false;
   uint32_t hold = PRIORITY[candidate] > PRIORITY[m.state] ? ENTER_HOLD_MS : EXIT_HOLD_MS;
-  if (now - condSince >= hold) { m.state = candidate; return true; }
+  if (now - candidateSince >= hold) { m.state = candidate; return true; }
   return false;
 }
 
-bool motionUpdate(const GyroRaw &raw) {
+bool motionUpdate(const GyroRaw &in) {
+  const GyroRaw raw = despike(in);
   const float k = gyroSensitivity();
   m.gx = raw.x * k - biasX;
   m.gy = raw.y * k - biasY;
   m.gz = raw.z * k - biasZ;
 
   float sq = m.gx * m.gx + m.gy * m.gy + m.gz * m.gz;
-  rmsSum += sq     - rmsBuf[rmsIdx];          // running sums, O(1)
-  xSum   += m.gx   - xBuf[rmsIdx];
-  ySum   += m.gy   - yBuf[rmsIdx];
-  zSum   += m.gz   - zBuf[rmsIdx];
-  rmsBuf[rmsIdx] = sq;
-  xBuf[rmsIdx] = m.gx; yBuf[rmsIdx] = m.gy; zBuf[rmsIdx] = m.gz;
-  rmsIdx = (rmsIdx + 1) % RMS_WINDOW;
-  m.rms = sqrtf(rmsSum / RMS_WINDOW);
-  sampleCount++;
+  sqSum += sq   - sqBuf[winIdx];
+  xSum  += m.gx - xBuf[winIdx];
+  ySum  += m.gy - yBuf[winIdx];
+  zSum  += m.gz - zBuf[winIdx];
+  sqBuf[winIdx] = sq;
+  xBuf[winIdx] = m.gx; yBuf[winIdx] = m.gy; zBuf[winIdx] = m.gz;
+  winIdx = (winIdx + 1) % RMS_WINDOW;
+  m.rms = sqrtf(sqSum / RMS_WINDOW);
 
-  // Jitter = spread about the window mean, i.e. RMS with any constant offset removed
-  // (var = E[g²] - E[g]²). This is the only honest "is it being moved?" test, because a
-  // bad bias inflates the mean and leaves the spread untouched.
+  // jitter = RMS with the window mean removed: var = E[g²] - E[g]²
   float mx = xSum / RMS_WINDOW, my = ySum / RMS_WINDOW, mz = zSum / RMS_WINDOW;
-  float var = rmsSum / RMS_WINDOW - (mx * mx + my * my + mz * mz);
+  float var = sqSum / RMS_WINDOW - (mx * mx + my * my + mz * mz);
   m.jitter = var > 0 ? sqrtf(var) : 0;
 
   uint32_t now = millis();
 
-  // Continuous re-zeroing (P4.2). While the car is demonstrably not being moved, leak the
-  // residual mean into the bias. This corrects temperature drift, and — the reason it
-  // exists — a bias poisoned by a car that was moving at boot: the car recovers on its own
-  // once it is set down, instead of being wrong until the next reset.
+  // At rest, leak the residual mean into the bias: fixes drift and a bias poisoned at boot.
   if (m.jitter > REST_JITTER_DPS) restSince = now;
   else if (now - restSince >= REZERO_AFTER_MS) {
-    const float k = SAMPLE_S / (REZERO_TAU_MS / 1000.0f);
-    biasX += mx * k; biasY += my * k; biasZ += mz * k;
+    const float leak = SAMPLE_S / (REZERO_TAU_MS / 1000.0f);
+    biasX += mx * leak; biasY += my * leak; biasZ += mz * leak;
   }
-  if (now - peakSince > PEAK_HOLD_MS) { m.rmsPeak = 0; m.gzPeak = 0; peakSince = now; }
-  if (m.rms > m.rmsPeak)      m.rmsPeak = m.rms;
-  if (fabsf(m.gz) > m.gzPeak) m.gzPeak  = fabsf(m.gz);
 
   return updateState(now);
 }

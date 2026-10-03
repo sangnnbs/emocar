@@ -88,9 +88,9 @@ never buffered in RAM.
 | `GET <n>` | `OK <len>` + `<len>` raw bytes (`ERR placeholder in use` when the slot has no file) |
 | `PUT <n> <len>` | `READY <chunk>`, then the payload one chunk at a time, each answered `ACK <got>` once it is on flash, and `OK <bytes>` at the end |
 
-Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. The same port also carries
-the car's telemetry printing — a line every 250 ms — so a client reads past any line that
-doesn't start with one of those four words.
+Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. Current firmware prints
+nothing else, but older builds also print telemetry on the same port, so a client reads
+past any line that doesn't start with one of those four words.
 
 **The chunking is not optional**, and any other client (a Web Serial page, say) has to do
 the same. USB CDC looks reliable but isn't, end to end: the C3 driver's interrupt pushes

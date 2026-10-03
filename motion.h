@@ -14,21 +14,16 @@ const char *carStateName(CarState s);
 struct Motion {
   float gx, gy, gz;       // bias-corrected, dps
   float rms;              // 3-axis vibration RMS over RMS_WINDOW_MS
-  float rmsPeak, gzPeak;  // peak hold over PEAK_HOLD_MS — for threshold tuning
-  float jitter;           // wobble around the mean — stillness independent of any bias error
-  float rollAcc;          // accumulated roll angle (deg) — the context bit's input
-  bool  handCtx;          // true = in a hand; gates HAPPY on and FAST off
+  float jitter;           // wobble around the mean
+  float rollAcc;          // accumulated roll travel (deg)
+  bool  handCtx;          // true = in a hand
   CarState state;
-  uint32_t sampleRate;    // samples processed in the last second
 };
 
 void        motionSetBias(float bx, float by, float bz);
-void        motionGetBias(float &bx, float &by, float &bz);
 void        motionReset();
-// Boot calibration (P4.1): given the mean rate of each of n calibration blocks, returns
-// true and the bias if at least CALIB_MIN_AGREE of them agree on one. `agree` is the count.
+// Given the mean rate of n calibration blocks, returns true and the bias if at least
+// CALIB_MIN_AGREE of them agree. `agree` is the count.
 bool        motionCalibFit(const float blk[][3], int n, float bias[3], int &agree);
-// Returns true if the state changed on this sample.
-bool        motionUpdate(const GyroRaw &raw);
+bool        motionUpdate(const GyroRaw &raw);   // true if the state changed
 const Motion &motionGet();
-void        motionTick();   // call every loop: maintains the 1-s sample-rate counter

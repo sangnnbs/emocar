@@ -1,14 +1,10 @@
-// display.cpp — panel driver backends behind the display.h API.
-// Exactly one DISP_DRIVER_* is enabled in config.h. Each backend implements
-// displayBegin / displayFrame / displayMessage for its panel; displayFrame
-// receives frames in the profile's qgif pixel format.
+// display.cpp — panel driver backends; exactly one DISP_DRIVER_* is enabled in config.h.
 #include <Arduino.h>
 #include "config.h"
 #include "display.h"
 
 #if DISP_DRIVER_U8G2_SH1106_I2C
-// ---------------------------------------------------------------- SH1106 over I2C (U8g2)
-// mono1 profile: qgif bit 1 = dark; U8g2 drawBitmap bit 1 = lit, so invert on copy.
+// SH1106 over I2C (U8g2). qgif mono1 bit 1 = dark, U8g2 bit 1 = lit: invert on copy.
 #include <U8g2lib.h>
 
 static U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);

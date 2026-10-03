@@ -35,6 +35,15 @@ static void feed(float gx, float gy, float gz, int ms) {
   }
 }
 
+// One sample with `lsb` added to one axis, in raw counts — the torn FIFO read, reproduced
+// exactly as the board delivers it (see DESPIKE_MEDIAN3).
+static void feedSpike(float gx, float gy, float gz, int axis, int lsb) {
+  GyroRaw s = mk(gx, gy, gz);
+  if (axis == 0) s.x += lsb; else if (axis == 1) s.y += lsb; else s.z += lsb;
+  fakeMillis += SAMPLE_US / 1000;
+  motionUpdate(s);
+}
+
 static int fails = 0;
 static void expect(const char *what, CarState want) {
   CarState got = motionGet().state;
@@ -117,6 +126,56 @@ int main() {
   feed(0.5f, 0.5f, 0.5f, 3000);
   expect("still, 3 s", NORMAL);
 
+  // --- 1b. a fingernail tap must not move the face (2026-09-20) -------------
+  // The complaint from the car: touching it with a nail, or knocking the table, flipped it
+  // to FAST. A tap is *louder* than anything the car does by itself (rms 40+ here), so no
+  // threshold can reject it — only its shortness can. It lifts the RMS for one window and
+  // is gone, well under FAST_HOLD_MS.
+  printf("tapped with a fingernail\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(150.0f, 200.0f, 120.0f, 10);       // one nail tap: huge, 10 ms long
+  feed(0.5f, 0.5f, 0.5f, 400);
+  expect("just after a tap", NORMAL);
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  expect("a second later", NORMAL);
+  expectCtx("a tap is not a pickup", false);
+
+  printf("fidgeted with: eight taps over four seconds\n");
+  for (int i = 0; i < 8; i++) {
+    feed(150.0f, 200.0f, 120.0f, 10);
+    feed(0.5f, 0.5f, 0.5f, 490);
+  }
+  expect("still nobody picked it up", NORMAL);
+  expectCtx("...and rollAcc never walked to the tilt threshold", false);
+  printf("  ..  rollAcc %.1f deg after eight taps (threshold %.0f)\n",
+         motionGet().rollAcc, HAND_TILT_DEG);
+
+  // --- 1b2. the torn FIFO read must not move the face (measured 2026-09-20) --
+  // On the bench the car flipped to FAST five times in 30 s lying untouched, every time
+  // from ONE sample exactly 256 LSB out on one axis: a low byte from one sample and a high
+  // byte from the next. One such sample lifts a 50-sample RMS from 0.6 to 2.6 on its own.
+  printf("torn FIFO read: one sample 256 LSB out, car untouched\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  for (int i = 0; i < 6; i++) {                 // one on each axis, both signs
+    feedSpike(0.5f, 0.5f, 0.5f, i / 2, i % 2 ? 256 : -256);
+    feed(0.5f, 0.5f, 0.5f, 400);
+    if (motionGet().rms > 1.0f) {
+      printf("  FAIL spike on axis %d survived the filter: rms %.2f\n", i / 2, motionGet().rms);
+      fails++;
+    }
+  }
+  expect("six torn samples, none of them believed", NORMAL);
+  printf("  ..  rms %.2f after six spikes (a single 256 LSB spike alone reads 2.6)\n",
+         motionGet().rms);
+
+  // --- 1c. a trembling surface is not the car going fast --------------------
+  printf("sitting on a faintly buzzing surface\n");
+  reset();
+  feed(1.8f, 1.8f, 1.8f, 4000);           // rms 3.1: above the old 2.5, below the new 4.0
+  expect("low continuous tremble", NORMAL);
+
   // --- 2. pushed across the floor: FAST, never HAPPY ------------------------
   printf("pushed across the floor (the case that used to read HAPPY)\n");
   reset();
@@ -191,14 +250,31 @@ int main() {
   if (spinCond) fails++;
   expect("a shaken car on the floor is not dizzy, just busy", FAST);
 
+  // --- 8b. the ring of a knock is not a spin ------------------------------
+  // An impulse leaves the gyro ringing: big |gz|, alternating, dying out. Fast enough that
+  // no single direction survives SPIN_HOLD_MS.
+  printf("knocked on the table: the ring must not read as a spin\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  for (int i = 0; i < 6; i++) {
+    float a = 200.0f / (1 << i);          // decaying ring, 50 ms per half-cycle
+    feed(a * 0.5f, a * 0.5f, i % 2 ? a : -a, 50);
+  }
+  printf("  %s spin path stayed closed through the ring\n", spinCond ? "FAIL" : "ok  ");
+  if (spinCond) fails++;
+  feed(0.5f, 0.5f, 0.5f, 1500);
+  expect("a knock leaves no wooze behind", NORMAL);
+
   // --- 9. fast attack, slow decay (P1) ------------------------------------
   // The same threshold crossed in both directions must not take the same time: going up
   // the ladder is a reaction, coming down is a feeling wearing off.
   printf("attack vs decay across one threshold\n");
   reset();
   feed(0.5f, 0.5f, 0.5f, 1000);
-  feed(6.0f, 1.5f, 3.0f, 400);            // up: NORMAL -> FAST inside ENTER_HOLD_MS
-  expect("400 ms after the motion started", FAST);
+  feed(6.0f, 1.5f, 3.0f, 400);            // up: the condition has not proved itself yet
+  expect("400 ms after the motion started (FAST_HOLD_MS)", NORMAL);
+  feed(6.0f, 1.5f, 3.0f, 400);            // ...FAST_HOLD_MS, then ENTER_HOLD_MS on top
+  expect("800 ms after the motion started", FAST);
   feed(0.5f, 0.5f, 0.5f, 600);            // down: well past ENTER_HOLD_MS...
   expect("600 ms after the motion stopped (still decaying)", FAST);
   feed(0.5f, 0.5f, 0.5f, 900);            // ...and past EXIT_HOLD_MS

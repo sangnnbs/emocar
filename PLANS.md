@@ -419,6 +419,99 @@ cable-stress test.
       one constant whose whole purpose is *feel*, so a measurement cannot settle it
 
 
+#### Too sensitive on the real car — fixed with dwell, not with levels (2026-09-20)
+
+First finding from the car itself: **a fingernail touch, a knock on the table or a
+small vibration flipped the face**, mostly to FAST and occasionally into 🥰. Every
+threshold in the file is a *level*, and a level cannot fix this — a tap measures
+louder than anything the car does on its own (RMS well into the tens), so any value
+that rejects a tap also rejects rolling. What separates them is **duration**: a
+touch is an impulse that is over in milliseconds, and the RMS only stays up as long
+as the window takes to slide past it. Everything the car actually does — rolling,
+being spun, being carried — goes on for hundreds of ms or more.
+
+So each condition now has to *last*, which is exactly the shape `SPIN_HOLD_MS`
+already had; the other two grew the same rule rather than a new idea:
+
+| Constant | Was | Now | Why |
+|---|---|---|---|
+| `FAST_HOLD_MS` | — | 500 | new: RMS must stay up for 2× the RMS window. This is the anti-tap fix |
+| `FAST_ENTER_RMS` | 2.5 | 4.0 | the *other* half of the complaint: a continuously trembling surface |
+| `FAST_EXIT_RMS` | 1.5 | 2.5 | keeps the same hysteresis gap |
+| `HAND_ROLL_MS` | — | 150 | new: only count roll travel once \|gy\| has been up that long — a tap used to donate degrees to `rollAcc` like a real turn |
+| `HAND_QUIET_DPS` | 3.0 | 6.0 | small wobble is not travel |
+| `SPIN_HOLD_MS` | 200 | 300 | an impulse rings in alternating directions; a longer hold outlasts the ring |
+
+Costs, accepted: FAST now takes ~700 ms to appear instead of ~200 (`FAST_HOLD_MS`
+then `ENTER_HOLD_MS`) — it reads as *the car got going* rather than *something
+happened*, which is what it is supposed to mean. And `FAST_ENTER_RMS` 4.0 undoes
+the soft-surface headroom the 2.5 experiment bought; if a car pushed across a bed
+stops reaching FAST, put it back to ~3.0, because the dwell now keeps taps out by
+itself — which is what 2.5 never had. `SPIN_ENTER_DPS` was left at 40 on purpose:
+the only figure for a real spin is the unconfirmed \|gz\| ≈ 60, so raising the rate
+risks losing the gesture; the hold was the safe half to tighten.
+
+Tests: `test/motion_test.cpp` grew a nail tap, eight taps over four seconds
+(`rollAcc` stays at 0°, so HAPPY is unreachable by fidgeting), a faintly buzzing
+surface, and the ring of a knock against the spin path.
+
+- [ ] Confirm on the car that a deliberate push still reaches FAST within ~1 s
+- [ ] Confirm a pickup still reaches HAPPY as readily as before the `HAND_ROLL_MS` gate
+
+#### ...and then the bench said the face moves on its own (2026-09-20)
+
+The dwell fix above was reported as not working: *"i touched the gyro sensor a bit (or blow
+it lightly from far), NORMAL changes to FAST — is it sensitive or not?"* Captured the
+serial telemetry instead of guessing a third time, and the capture answered a question
+nobody had asked. **With the car lying untouched on the desk, it entered FAST five times
+in thirty seconds.** No hand, no blow, nothing.
+
+Every one of those entries looks identical, and that is the tell — physical events are
+never quantised:
+
+```
+ 3.00   -0.5   0.3   0.1 | rms 2.5 pk 2.5 | jit 2.5 | gz pk 17.1 | ... | NORMAL
+ 3.04  >>> state = FAST
+ 3.29   -0.7   0.5  -0.2 | rms 0.6 pk 2.5 | jit 0.6 | ...          | FAST
+```
+
+The RMS sat at 0.6, jumped to 2.6 for exactly one 250 ms print, and fell straight back —
+one bad *sample*, not an event. Working back through the 50-sample window, that sample was
+17.90 dps, and 17.90 / 0.070 = **255.7 ≈ 256 LSB**: one count in the **high byte**. That is
+a torn read — low byte from one sample, high byte from the next — and a gyro at rest is
+exactly where it is most likely, because its raw value hovers around zero and so crosses
+the `0xFFFF -> 0x0000` rollover constantly. `CTRL_REG4`'s BDU bit is the register-level
+cure for precisely this and it was **already on**; BDU protects the *output registers*, and
+samples read out through the FIFO never pass through them.
+
+**This is almost certainly the "+18.5 dps gz incident" that poisoned a boot calibration in
+P4** — same magnitude, same random axis, same car sitting still. It has been in every
+capture this project has taken.
+
+Fix: `DESPIKE_MEDIAN3` — a median of three raw samples per axis at the input of
+`motionUpdate`. An isolated wrong value is by definition the odd one out, so it is never
+the median and is dropped without touching its neighbours; real motion moves all three
+samples together and passes through untouched. One sample of lag (5 ms).
+
+Measured on the board, same desk, same 202 sps:
+
+| | state changes, untouched | peak RMS |
+|---|---|---|
+| before | 5 in 30 s | 2.6 |
+| after | **0 in 40 s** | **0.5** |
+
+Also added: the boot banner now prints the tuning it was built with
+(`Tuning: FAST 4.0/2.5 rms held 500 ms | spin 40 dps held 300 ms | hand 25 deg | despike
+median3`). The round trip above was spent on a capture from a board that was still running
+the *previous* flash, which the timing gave away (FAST entered 200 ms after a 2.6 spike —
+the old `FAST_ENTER_RMS` 2.5 with no dwell) but only after the numbers were worked through.
+A capture that cannot identify its own build is worth much less than it looks.
+
+- [x] Despike the FIFO's torn samples; verify on the board before and after
+- [x] Print the build's tuning in the boot banner
+- [ ] Still worth confirming by hand on the car: a push reaches FAST within ~1 s, and a
+      pickup still reaches HAPPY as readily as before the `HAND_ROLL_MS` gate
+
 ### P6 — A state's signal can't be changed without a reflash
 
 Every threshold lives in `config.h` as a `#define`, so trying a number costs an

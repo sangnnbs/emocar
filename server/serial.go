@@ -1,9 +1,9 @@
 // serial.go — the link to the car: one USB serial port, held open, reconnecting
 // by itself when the cable is pulled or the car is reflashed.
 //
-// The port carries the car's telemetry printing (a line every 250 ms) as well as
-// this protocol, so reading a reply means skipping lines until one starts with a
-// protocol word.
+// Current firmware prints nothing but this protocol, but older builds also print
+// telemetry on the port, so reading a reply means skipping lines until one starts
+// with a protocol word.
 //
 //	STATUS         -> OK {json}
 //	GET <n>        -> OK <len> + <len> raw bytes
@@ -149,7 +149,7 @@ func (l *carLink) exact(n int, deadline time.Time) ([]byte, error) {
 	return out, nil
 }
 
-// reply reads past the telemetry printing to the first protocol line.
+// reply reads past any non-protocol output to the first protocol line.
 func (l *carLink) reply(deadline time.Time) (string, string, error) {
 	for {
 		s, err := l.line(deadline)
@@ -163,7 +163,7 @@ func (l *carLink) reply(deadline time.Time) (string, string, error) {
 		case "ERR":
 			return "", "", fmt.Errorf("car: %s", rest)
 		}
-		// anything else is telemetry
+		// anything else is non-protocol output
 	}
 }
 
