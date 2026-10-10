@@ -17,6 +17,8 @@ struct Motion {
   float jitter;           // wobble around the mean
   float rollAcc;          // accumulated roll travel (deg)
   bool  handCtx;          // true = in a hand
+  int   swings[3];        // gx, gy, gz swings past SHAKE_DPS in the last SHAKE_WINDOW_MS
+  uint32_t spinMs;        // how long |gz| has held SPIN_GZ_DPS one way (0 = no spin)
   CarState state;
 };
 

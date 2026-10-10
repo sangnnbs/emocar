@@ -73,6 +73,16 @@ sequence, so touching them would reboot the car every time the server connected.
 - **+ add GIF** copies a new file into the uploads folder (`gifs/` next to the binary by
   default) and it appears in the library.
 
+- **Sensor dashboard** (`/dashboard`, linked from the top of the page) shows the gyro
+  live while the car is plugged in: rates per axis with their turn direction, a 3D board
+  that follows the sensor's orientation, a 5/10/30 s chart of the rates, and a chart of
+  what the states actually read (rms, jitter, roll travel, with strips for the state and
+  for hand/floor). **Zero** makes the current pose 0° on every axis. The orientation is
+  every rotation added up, so it drifts a few degrees a minute: Zero again when it wanders.
+  **Pause** (or Space) freezes the view so you can read it. Data keeps arriving behind it.
+  Hover a chart to read any moment. The car needs `TELEMETRY 1` and at least one
+  `STATE_*` besides NORMAL in config.h, otherwise the gyro isn't running.
+
 The car stores only the four active animations (LittleFS `/anim0..3.qgif`); the library
 never leaves the PC. Uploads survive power cycles and firmware reflashes.
 
@@ -85,12 +95,20 @@ never buffered in RAM.
 | Command | Reply |
 |---|---|
 | `STATUS` | `OK {state, heap, uptime, profile, w, h, format, slots:[{file,frames,bytes}×4]}` |
+| `ZERO` | `OK`; the telemetry orientation restarts from the current pose |
 | `GET <n>` | `OK <len>` + `<len>` raw bytes (`ERR placeholder in use` when the slot has no file) |
 | `PUT <n> <len>` | `READY <chunk>`, then the payload one chunk at a time, each answered `ACK <got>` once it is on flash, and `OK <bytes>` at the end |
 
-Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. Current firmware prints
-nothing else, but older builds also print telemetry on the same port, so a client reads
-past any line that doesn't start with one of those four words.
+Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. The firmware also prints
+debug lines on the same port (`DEBUG_LOG` in config.h), so a client reads past any line
+that doesn't start with one of those four words.
+
+With `TELEMETRY 1` the car also prints a sensor line every `TELEMETRY_MS` (40 ms):
+`T <ms> <gx> <gy> <gz> <qw> <qx> <qy> <qz> <rms> <jitter> <rollAcc> <F|H> <sx/sy/sz> <state> <spinMs>`
+(fields explained in the firmware's `telem.h`). While a dashboard is open, the server keeps
+reading the port between commands and streams those lines to the page as server-sent
+events (`/api/telemetry`). Because the port is never quiet now, the pre-command drain is
+capped at 100 ms.
 
 **The chunking is not optional**, and any other client (a Web Serial page, say) has to do
 the same. USB CDC looks reliable but isn't, end to end: the C3 driver's interrupt pushes
@@ -110,9 +128,11 @@ Validation before the rename means a dropped transfer can't corrupt the active s
 ```
 main.go        flags, library scan, HTTP API for the UI, proxy to the car
 serial.go      the car link: port auto-detect, reconnect, STATUS / GET / PUT
+telemetry.go   the dashboard's live feed: background reader, SSE fan-out, ZERO
 profiles.go    display profile registry (embeds profiles.json)
 qgif.go        GIF -> .qgif conversion per profile (composite, box resize, pack) + preview render
-web/index.html the whole UI, embedded into the binary
+web/index.html the animations UI, embedded into the binary
+web/dashboard.html  the sensor dashboard (/dashboard), embedded too
 ```
 
 ## .qgif container (v2)

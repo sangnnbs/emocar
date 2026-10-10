@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emocar sensor</title>
+<style>
+  :root {
+    --bg: #101216; --panel: #191c22; --edge: #2a2e37; --text: #d6dae2;
+    --dim: #8a909c; --accent: #4da3ff; --ok: #46c46e; --bad: #e05555;
+    --gx: #ff6b6b; --gy: #5ad17a; --gz: #4da3ff;
+    --rms: #f0b84a; --jit: #c38bff; --roll: #4fd1c5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 16px 20px 60px; }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 8px 0 2px; }
+  h1 span { color: var(--dim); font-weight: 400; }
+  header a { margin-left: auto; color: var(--accent); text-decoration: none; }
+  h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase;
+       letter-spacing: .06em; display: flex; align-items: center; gap: 8px; }
+  h2 select:first-of-type { margin-left: auto; }
+  #carline { color: var(--dim); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+         background: var(--bad); margin-right: 6px; }
+  .dot.on { background: var(--ok); }
+  .dot.paused { background: var(--dim); }
+
+  .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+         margin: 14px 0; padding: 10px 14px; background: var(--panel);
+         border: 1px solid var(--edge); border-radius: 10px; }
+  .bar .push { margin-left: auto; display: flex; gap: 8px; }
+  .pill { padding: 2px 10px; border-radius: 99px; border: 1px solid var(--edge);
+          font-weight: 600; font-size: 13px; }
+  #live { font-weight: 600; }
+  #warn { color: #e0a53c; font-size: 13px; }
+  #msg { font-size: 13px; color: var(--dim); }
+
+  .grid { display: grid; grid-template-columns: minmax(300px, 5fr) 7fr; gap: 14px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+          padding: 14px; min-width: 0; }
+
+  #cube { width: 100%; aspect-ratio: 1 / 0.85; display: block; }
+  .angles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+  .angles div { background: var(--bg); border-radius: 8px; padding: 6px 10px; }
+  .angles small, .rate small { color: var(--dim); display: block; font-size: 11px; }
+  .angles b { font: 600 20px/1.2 ui-monospace, monospace; }
+  #turn { margin-top: 10px; color: var(--dim); }
+  #turn b { color: var(--text); }
+  .legend { font-size: 12px; color: var(--dim); margin-top: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+              margin: 0 4px -1px 10px; }
+
+  .rate { display: grid; grid-template-columns: 54px 92px 1fr 120px; align-items: center;
+          gap: 10px; padding: 5px 0; }
+  .rate .v { font: 600 18px/1 ui-monospace, monospace; text-align: right; }
+  .rate .track { position: relative; height: 12px; background: var(--bg); border-radius: 6px; }
+  .rate .track::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px;
+                        width: 1px; background: var(--dim); }
+  .rate .fill { position: absolute; top: 0; bottom: 0; border-radius: 6px; }
+  .rate .dir { font-size: 13px; }
+
+  canvas.chart { width: 100%; height: 200px; display: block; cursor: crosshair; }
+  #mchart { height: 170px; }
+  .readout { font: 12px/1.5 ui-monospace, monospace; color: var(--dim); min-height: 18px;
+             margin-top: 6px; white-space: pre-wrap; }
+  .keys { font-size: 12px; color: var(--dim); }
+  .keys i { display: inline-block; width: 12px; height: 3px; margin: 0 4px 3px 10px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+  .stats div { background: var(--bg); border-radius: 8px; padding: 6px 10px; }
+  .stats small { color: var(--dim); display: block; font-size: 11px; }
+  .stats b { font: 600 17px/1.3 ui-monospace, monospace; }
+
+  select, button { background: #22262e; color: var(--text); border: 1px solid var(--edge);
+                   border-radius: 6px; padding: 5px 12px; font: inherit; cursor: pointer; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  h2 select { padding: 2px 6px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>emocar <span>· sensor dashboard</span></h1>
+    <div id="carline"><span class="dot" id="dot"></span><span id="cartext">connecting…</span></div>
+    <a href="/">← Animations</a>
+  </header>
+
+  <div class="bar">
+    <span id="live"><span class="dot" id="livedot"></span><span id="livetext">waiting</span></span>
+    <span>state <span class="pill" id="state">–</span></span>
+    <span id="ctx" class="pill">–</span>
+    <span id="warn"></span>
+    <div class="push">
+      <span id="msg"></span>
+      <button id="pause" title="Space">Pause</button>
+      <button id="zero" title="Current pose becomes 0° on every axis">Zero</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <div class="card">
+        <h2>Orientation <span style="text-transform:none;letter-spacing:0">since Zero / boot</span></h2>
+        <canvas id="cube"></canvas>
+        <div class="angles">
+          <div><small>pitch · about X</small><b id="apitch">–</b></div>
+          <div><small>roll · about Y</small><b id="aroll">–</b></div>
+          <div><small>yaw · about Z</small><b id="ayaw">–</b></div>
+        </div>
+        <div id="turn">–</div>
+        <div class="legend"><i style="background:#2f6fb8"></i>board top <i style="background:#4a4f5a"></i>bottom
+          <i style="background:none;border:1px dashed var(--dim)"></i>zero pose</div>
+      </div>
+      <div class="card">
+        <h2>Motion (what the states read)</h2>
+        <div class="stats">
+          <div><small>rms dps</small><b id="srms">–</b></div>
+          <div><small>jitter dps</small><b id="sjit">–</b></div>
+          <div><small>roll travel °</small><b id="sroll">–</b></div>
+          <div><small>swings / 2 s · DIZZY at 6</small><b id="sswings">–</b></div>
+          <div><small>spin s</small><b id="sspin">–</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <h2>Rates (deg/s)
+          <select id="range" title="Bar and chart scale">
+            <option value="100">±100</option><option value="500" selected>±500</option>
+            <option value="2000">±2000</option>
+          </select>
+          <select id="win" title="Chart window">
+            <option value="5">5 s</option><option value="10" selected>10 s</option>
+            <option value="30">30 s</option>
+          </select>
+        </h2>
+        <div id="rates"></div>
+        <canvas class="chart" id="gchart"></canvas>
+        <div class="keys"><i style="background:var(--gx)"></i>gx<i style="background:var(--gy)"></i>gy
+          <i style="background:var(--gz)"></i>gz · peak per line, hover to read</div>
+        <div class="readout" id="gread"></div>
+      </div>
+      <div class="card">
+        <h2>Motion signals
+          <select id="mrange" title="Chart scale">
+            <option value="10">0–10</option><option value="50" selected>0–50</option>
+            <option value="500">0–500</option>
+          </select>
+        </h2>
+        <canvas class="chart" id="mchart"></canvas>
+        <div class="keys"><i style="background:var(--rms)"></i>rms<i style="background:var(--jit)"></i>jitter
+          <i style="background:var(--roll)"></i>roll travel° · strips: state, hand</div>
+        <div class="readout" id="mread"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const STATE_COLOR = { NORMAL: '#5b6170', FAST: '#e08a3c', DIZZY: '#b26bff', HAPPY: '#46c46e' };
+const KEEP_MS = 30000;
+const STALE_MS = 1500;
+
+let hist = [];          // parsed samples, oldest first
+let view = hist;        // what the charts draw: hist, or a frozen copy while paused
+let paused = false;
+let lastAt = 0;         // performance.now() of the last sample
+let online = false;
+let hover = null;       // {chart, x} in CSS px
+let dirty = true;
+
+// ------------------------------------------------------------ data
+
+// T <ms> gx gy gz qw qx qy qz rms jitter rollAcc ctx sx/sy/sz state spinMs (telem.h)
+function parse(line) {
+  const f = line.trim().split(/\s+/);
+  if (f.length < 14) return null;
+  const n = f.slice(0, 11).map(Number);
+  if (n.some(isNaN)) return null;
+  return { ms: n[0], gx: n[1], gy: n[2], gz: n[3], q: [n[4], n[5], n[6], n[7]],
+           rms: n[8], jitter: n[9], roll: n[10], hand: f[11] === 'H', swings: f[12].split('/').map(v => +v || 0),
+           state: f[13], spin: (+f[14] || 0) / 1000 };
+}
+
+function push(s) {
+  const last = hist[hist.length - 1];
+  if (last && s.ms < last.ms) hist = [];       // the car rebooted
+  hist.push(s);
+  while (hist.length && hist[0].ms < s.ms - KEEP_MS) hist.shift();
+  if (!paused) view = hist;
+  lastAt = performance.now();
+  dirty = true;
+}
+
+function connect() {
+  const es = new EventSource('/api/telemetry');
+  es.addEventListener('t', e => { const s = parse(e.data); if (s) push(s); });
+  es.addEventListener('link', e => {
+    const l = JSON.parse(e.data);
+    online = l.online;
+    $('dot').className = 'dot' + (l.online ? ' on' : '');
+    $('cartext').textContent = l.online ? `connected ${l.port}` : (l.error || 'offline');
+  });
+  es.onerror = () => {
+    online = false;
+    $('dot').className = 'dot';
+    $('cartext').textContent = 'server not reachable — retrying';
+  };
+}
+
+// ------------------------------------------------------------ orientation
+
+// Rotation matrix of q (sensor -> reference), rows.
+function rot([w, x, y, z]) {
+  return [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+    [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+    [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+  ];
+}
+const deg = r => r * 180 / Math.PI;
+
+// R = Rz(yaw) · Rx(pitch) · Ry(roll): yaw about Z, then pitch about X, then roll about Y.
+function euler(R) {
+  const c = v => Math.max(-1, Math.min(1, v));
+  return { pitch: deg(Math.asin(c(R[2][1]))), roll: deg(Math.atan2(-R[2][0], R[2][2])),
+           yaw: deg(Math.atan2(-R[0][1], R[1][1])) };
+}
+
+const BOX = (() => {   // GY-50-ish board, X wide, Y deep, Z thin
+  const a = 1.0, b = 0.75, c = 0.08, v = [];
+  for (const z of [-c, c]) for (const y of [-b, b]) for (const x of [-a, a]) v.push([x, y, z]);
+  return v;   // index = x + 2y + 4z bits
+})();
+const FACES = [ // [vertex ids, kind]
+  [[4, 5, 7, 6], 'top'], [[0, 2, 3, 1], 'bottom'],
+  [[0, 1, 5, 4], 'side'], [[2, 6, 7, 3], 'side'], [[0, 4, 6, 2], 'side'], [[1, 3, 7, 5], 'side'],
+];
+
+function drawCube(R) {
+  const cv = $('cube'), g = fit(cv), W = cv.clientWidth, H = cv.clientHeight;
+  const az = -35 * Math.PI / 180, el = 28 * Math.PI / 180, k = Math.min(W, H) * 0.25;
+  const cx = W / 2, cy = H * 0.55;
+  // world -> screen: x right, z up, y into the screen, seen from above-front-left
+  const proj = ([x, y, z]) => {
+    const x1 = x * Math.cos(az) - y * Math.sin(az), y1 = x * Math.sin(az) + y * Math.cos(az);
+    return { x: cx + x1 * k, y: cy - (z * Math.cos(el) + y1 * Math.sin(el)) * k,
+             d: y1 * Math.cos(el) - z * Math.sin(el) };
+  };
+  const apply = v => [0, 1, 2].map(i => R[i][0] * v[0] + R[i][1] * v[1] + R[i][2] * v[2]);
+
+  g.clearRect(0, 0, W, H);
+  // zero pose, dashed
+  g.setLineDash([4, 4]); g.strokeStyle = '#555b66'; g.lineWidth = 1;
+  poly(g, [4, 5, 7, 6].map(i => proj(BOX[i])), null);
+  g.setLineDash([]);
+
+  const P = BOX.map(v => proj(apply(v)));
+  const faces = FACES.map(([ids, kind]) => ({ pts: ids.map(i => P[i]), kind,
+                                              d: ids.reduce((s, i) => s + P[i].d, 0) / 4 }));
+  faces.sort((a, b) => b.d - a.d);       // far first
+  for (const f of faces) {
+    poly(g, f.pts, f.kind === 'top' ? '#2f6fb8' : f.kind === 'bottom' ? '#4a4f5a' : '#2a2e37');
+    if (f.kind === 'top') {               // the chip, so top reads as top
+      const c = [[-0.25, -0.25], [0.25, -0.25], [0.25, 0.25], [-0.25, 0.25]]
+        .map(([x, y]) => proj(apply([x, y, 0.09])));
+      const front = faces.indexOf(f) > faces.findIndex(o => o.kind === 'bottom');
+      if (front) poly(g, c, '#111');
+    }
+  }
+  // axes
+  const o = proj([0, 0, 0]);
+  for (const [v, col, name] of [[[1.6, 0, 0], css('--gx'), 'X'], [[0, 1.4, 0], css('--gy'), 'Y'],
+                                [[0, 0, 1.1], css('--gz'), 'Z']]) {
+    const p = proj(apply(v));
+    g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 2.5;
+    g.beginPath(); g.moveTo(o.x, o.y); g.lineTo(p.x, p.y); g.stroke();
+    g.beginPath(); g.arc(p.x, p.y, 3.5, 0, 7); g.fill();
+    g.font = '600 13px system-ui'; g.fillText(name, p.x + 6, p.y - 4);
+  }
+}
+
+function poly(g, pts, fill) {
+  g.beginPath();
+  pts.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y));
+  g.closePath();
+  if (fill) { g.fillStyle = fill; g.fill(); g.strokeStyle = '#000'; g.lineWidth = 1; }
+  g.stroke();
+}
+
+// ------------------------------------------------------------ charts
+
+function fit(cv) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return g;
+}
+
+// series: [{key, color}]; lo..hi value range; strips: bands drawn under the plot
+function drawChart(cv, data, series, lo, hi, strips) {
+  const g = fit(cv), W = cv.clientWidth, H = cv.clientHeight;
+  const L = 44, Rm = 8, T = 6, SH = strips ? 22 : 0, B = 18 + SH, ph = H - T - B;
+  const win = +$('win').value * 1000;
+  const end = data.length ? data[data.length - 1].ms : 0, start = end - win;
+  const X = ms => L + (ms - start) / win * (W - L - Rm);
+  const Y = v => T + (hi - Math.max(lo, Math.min(hi, v))) / (hi - lo) * ph;
+
+  g.clearRect(0, 0, W, H);
+  g.font = '11px ui-monospace, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle';
+  const ticks = lo < 0 ? [hi, hi / 2, 0, lo / 2, lo] : [hi, hi / 2, 0];
+  for (const t of ticks) {
+    g.strokeStyle = t === 0 ? '#3a3f4a' : '#23262d'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(L, Y(t)); g.lineTo(W - Rm, Y(t)); g.stroke();
+    g.fillStyle = css('--dim'); g.fillText(t, L - 6, Y(t));
+  }
+  g.textAlign = 'center';
+  for (let s = 0; s <= win / 1000; s += win > 10000 ? 5 : 1)
+    g.fillText(s ? `-${s}s` : 'now', X(end - s * 1000), H - 9);
+
+  const vis = data.filter(d => d.ms >= start);
+  for (const { key, color } of series) {
+    g.strokeStyle = color; g.lineWidth = 1.6; g.beginPath();
+    vis.forEach((d, i) => i ? g.lineTo(X(d.ms), Y(d[key])) : g.moveTo(X(d.ms), Y(d[key])));
+    g.stroke();
+  }
+  if (strips) {
+    strips.forEach((fn, si) => {
+      const y = T + ph + 4 + si * 9;
+      vis.forEach((d, i) => {
+        const nx = i + 1 < vis.length ? X(vis[i + 1].ms) : X(d.ms) + 2;
+        g.fillStyle = fn(d); g.fillRect(X(d.ms), y, Math.max(1, nx - X(d.ms)) + 0.5, 7);
+      });
+    });
+  }
+
+  if (hover && hover.cv === cv && vis.length) {
+    const ms = start + (hover.x - L) / (W - L - Rm) * win;
+    let best = vis[0];
+    for (const d of vis) if (Math.abs(d.ms - ms) < Math.abs(best.ms - ms)) best = d;
+    g.strokeStyle = '#8a909c'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(X(best.ms), T); g.lineTo(X(best.ms), T + ph); g.stroke();
+    return best;
+  }
+  return vis[vis.length - 1];
+}
+
+const f1 = v => (v >= 0 ? '+' : '') + v.toFixed(1);
+const age = d => (d.ms - view[view.length - 1].ms) / 1000;
+
+// ------------------------------------------------------------ render
+
+const AXES = [['gx', 'pitch'], ['gy', 'roll'], ['gz', 'yaw']];
+$('rates').innerHTML = AXES.map(([k, n]) => `
+  <div class="rate"><div><b style="color:var(--${k})">${k}</b><small>${n}</small></div>
+    <div class="v" id="v${k}">–</div>
+    <div class="track"><div class="fill" id="f${k}" style="background:var(--${k})"></div></div>
+    <div class="dir" id="d${k}">–</div></div>`).join('');
+
+// Looking down the + end of the axis: right-hand rule, + = counter-clockwise.
+function dirText(v) {
+  if (Math.abs(v) < 3) return '<span style="color:var(--dim)">still</span>';
+  return v > 0 ? '↺ CCW' : '↻ CW';
+}
+
+function render() {
+  requestAnimationFrame(render);
+  const stale = online && !paused && performance.now() - lastAt > STALE_MS;
+  $('livedot').className = 'dot' + (paused ? ' paused' : stale || !hist.length ? '' : ' on');
+  $('warn').textContent = !online ? '' : stale
+    ? 'car connected but sends no telemetry — flash firmware with TELEMETRY 1 and a STATE_* besides NORMAL' : '';
+  if (!dirty) return;
+  dirty = false;
+
+  const n = hist.length, recent = n ? hist.filter(d => d.ms > hist[n - 1].ms - 2000).length : 0;
+  $('livetext').textContent = paused ? 'PAUSED — data still arriving'
+    : n > 1 ? `LIVE ${Math.round(recent / 2)} Hz` : 'waiting';
+  $('pause').textContent = paused ? 'Resume' : 'Pause';
+  $('pause').className = paused ? 'on' : '';
+  if (!view.length) return;
+
+  const range = +$('range').value, mr = +$('mrange').value;
+  const gs = drawChart($('gchart'), view,
+    [{ key: 'gx', color: css('--gx') }, { key: 'gy', color: css('--gy') }, { key: 'gz', color: css('--gz') }],
+    -range, range);
+  const ms = drawChart($('mchart'), view,
+    [{ key: 'rms', color: css('--rms') }, { key: 'jitter', color: css('--jit') },
+     { key: 'roll', color: css('--roll') }],
+    0, mr, [d => STATE_COLOR[d.state] || '#333', d => d.hand ? '#46c46e' : '#23262d']);
+
+  // the hovered sample drives every readout; otherwise the newest one
+  const s = hover ? (hover.cv === $('gchart') ? gs : ms) : view[view.length - 1];
+  const t = age(s) ? ` @ ${age(s).toFixed(2)} s` : '';
+  $('gread').textContent = `gx ${f1(s.gx)}  gy ${f1(s.gy)}  gz ${f1(s.gz)} dps${t}`;
+  $('mread').textContent = `rms ${s.rms.toFixed(1)}  jitter ${s.jitter.toFixed(2)}  roll ${s.roll.toFixed(1)}°  ` +
+    `${s.hand ? 'HAND' : 'floor'}  swings ${s.swings.join('/')}  spin ${s.spin.toFixed(1)}s  ${s.state}${t}`;
+
+  for (const [k] of AXES) {
+    const v = s[k], w = Math.min(1, Math.abs(v) / range) * 50;
+    $('v' + k).textContent = f1(v);
+    Object.assign($('f' + k).style, v >= 0 ? { left: '50%', width: w + '%' }
+                                           : { left: 50 - w + '%', width: w + '%' });
+    $('d' + k).innerHTML = dirText(v);
+  }
+  const R = rot(s.q), e = euler(R);
+  $('apitch').textContent = f1(e.pitch) + '°';
+  $('aroll').textContent = f1(e.roll) + '°';
+  $('ayaw').textContent = f1(e.yaw) + '°';
+  const [dk, dn] = AXES.reduce((a, b) => Math.abs(s[b[0]]) > Math.abs(s[a[0]]) ? b : a);
+  $('turn').innerHTML = Math.abs(s[dk]) < 3 ? 'not turning'
+    : `turning <b>${dirText(s[dk])}</b> about ${dk[1].toUpperCase()} (${dn}) at <b>${Math.abs(s[dk]).toFixed(0)}°/s</b>`;
+  drawCube(R);
+
+  $('state').textContent = s.state;
+  $('state').style.borderColor = $('state').style.color = STATE_COLOR[s.state] || '';
+  $('ctx').textContent = s.hand ? 'in a HAND' : 'on the floor';
+  $('srms').textContent = s.rms.toFixed(1);
+  $('sjit').textContent = s.jitter.toFixed(2);
+  $('sroll').textContent = s.roll.toFixed(1);
+  $('sswings').textContent = s.swings.map((v, i) => `${'xyz'[i]} ${v}`).join(' · ');
+  $('sspin').textContent = s.spin ? s.spin.toFixed(1) : '–';
+}
+
+// ------------------------------------------------------------ controls
+
+function togglePause() {
+  paused = !paused;
+  view = paused ? hist.slice() : hist;
+  dirty = true;
+}
+$('pause').onclick = togglePause;
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && e.target.tagName !== 'SELECT') { e.preventDefault(); togglePause(); }
+});
+
+$('zero').onclick = async () => {
+  $('msg').textContent = 'zeroing…';
+  try {
+    const r = await (await fetch('/api/car/zero', { method: 'POST' })).json();
+    $('msg').textContent = r.ok ? 'zeroed' : r.error;
+  } catch { $('msg').textContent = 'server not reachable'; }
+  setTimeout(() => { $('msg').textContent = ''; }, 3000);
+};
+
+for (const id of ['gchart', 'mchart']) {
+  const cv = $(id);
+  cv.onmousemove = e => { hover = { cv, x: e.clientX - cv.getBoundingClientRect().left }; dirty = true; };
+  cv.onmouseleave = () => { hover = null; dirty = true; };
+}
+for (const id of ['range', 'win', 'mrange']) $(id).onchange = () => { dirty = true; };
+addEventListener('resize', () => { dirty = true; });
+
+connect();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

@@ -23,6 +23,9 @@ import (
 //go:embed web/index.html
 var indexHTML []byte
 
+//go:embed web/dashboard.html
+var dashboardHTML []byte
+
 var (
 	car        *carLink
 	libDirs    []string
@@ -210,6 +213,42 @@ func handleCarStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"online": true, "port": car.Port(), "status": status})
 }
 
+// GET /api/telemetry — server-sent events for /dashboard: `t` carries one telemetry
+// line from the car (fields in the firmware's telem.h), `link` the connection state.
+func handleTelemetry(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		jsonErr(w, 500, "streaming unsupported")
+		return
+	}
+	ch, cancel := car.Subscribe()
+	defer cancel()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev := <-ch:
+			fmt.Fprintf(w, "%s\n\n", ev)
+			fl.Flush()
+		}
+	}
+}
+
+// POST /api/car/zero — the car's current pose becomes the dashboard's reference.
+func handleZero(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonErr(w, 405, "POST only")
+		return
+	}
+	if err := car.Zero(); err != nil {
+		jsonErr(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 // GET /api/car/preview/{slot} — what the car currently plays, rendered for the browser.
 func handleCarPreview(w http.ResponseWriter, r *http.Request) {
 	n, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/api/car/preview/"))
@@ -375,6 +414,12 @@ func main() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
 	})
+	http.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(dashboardHTML)
+	})
+	http.HandleFunc("/api/telemetry", handleTelemetry)
+	http.HandleFunc("/api/car/zero", handleZero)
 	http.HandleFunc("/api/library", handleLibrary)
 	http.HandleFunc("/api/profiles", handleProfiles)
 	http.HandleFunc("/api/preview", handlePreview)

@@ -1,5 +1,6 @@
 // cmd.h — line-framed command protocol over USB serial, spoken by the Go server in server/:
 //   STATUS          -> OK {slot files, heap, uptime, display profile}
+//   ZERO            -> OK; the telemetry orientation restarts from the current pose
 //   GET <n>         -> OK <len> + <len> raw bytes of the slot's .qgif
 //   PUT <n> <len>   -> READY <chunk>, then the payload a chunk at a time, each
 //                      answered ACK <got> once it is on flash, then OK <bytes>

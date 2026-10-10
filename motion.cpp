@@ -1,13 +1,12 @@
 // motion.cpp — vibration RMS + the four-state machine.
 //
-//   want = handCtx     -> HAPPY      in a hand: nothing else applies
-//        : spin        -> DIZZY      a real spin on the floor
-//        : dizzyUntil  -> DIZZY      the wooze it earned afterwards
+//   want = dizzyUntil  -> DIZZY      shaken (any axis) or spun in yaw, in a hand or not
+//        : handCtx     -> HAPPY      in a hand
 //        : fast        -> FAST
 //        :                NORMAL
 //
 // Each condition owns its hysteresis. An unregistered state (STATE_* in config.h) falls
-// through to NORMAL; in a hand that is NORMAL too, never FAST or DIZZY.
+// through; in a hand that is HAPPY if registered, else NORMAL — never FAST.
 #include <Arduino.h>
 #include <math.h>
 #include "config.h"
@@ -17,7 +16,7 @@ static const char *NAMES[] = { "NORMAL", "FAST", "DIZZY", "HAPPY" };
 const char *carStateName(CarState s) { return NAMES[s]; }
 
 // Ladder rank per state. Separate from the enum, which is slot order and append-only.
-static const uint8_t PRIORITY[] = { 0, 1, 2, 3 };   // NORMAL, FAST, DIZZY, HAPPY
+static const uint8_t PRIORITY[] = { 0, 1, 3, 2 };   // NORMAL, FAST, DIZZY, HAPPY
 
 static const float SAMPLE_S = SAMPLE_US / 1000000.0f;
 
@@ -32,13 +31,25 @@ static int     winIdx;
 static uint32_t restSince;
 static CarState candidate; static uint32_t candidateSince;
 
-static bool     spinCond, fastCond;
+static bool     fastCond;
 static uint32_t fastSince;
-static int      spinDir; static uint32_t spinSince;
-static float    dose;                     // degrees spun during the current spin
-static bool     doseActive;
-static uint32_t dizzyUntil;
+static uint32_t dizzyUntil;               // DIZZY wanted until then (shake or spin)
 static uint32_t rollSince, stillSince, quietSince, rollHoldSince;
+
+// Shake, per axis: which side it is past (0 = re-armed), and when its last SWING_RING
+// swings were.
+#define SWING_RING 16
+static int8_t   swingSide[3];
+static uint32_t swingAt[3][SWING_RING];
+static int      swingIdx[3];
+
+// Spin: its direction (0 = none), when it started, when |gz| was last above SPIN_GZ_DPS.
+static int8_t   spinDir;
+static uint32_t spinStart, spinLast;
+
+// DIZZY_AFTER_MS includes the step-down, so the wanted window is the rest of it.
+static_assert(DIZZY_AFTER_MS >= EXIT_HOLD_MS, "DIZZY_AFTER_MS includes EXIT_HOLD_MS");
+static const uint32_t DIZZY_WANT_MS = DIZZY_AFTER_MS - EXIT_HOLD_MS;
 
 static GyroRaw  h1, h2;                   // the two raw samples before this one
 static int      histN;
@@ -100,10 +111,13 @@ void motionReset() {
   sqSum = xSum = ySum = zSum = 0; winIdx = 0;
   restSince = candidateSince = now;
   candidate = NORMAL;
-  spinCond = fastCond = false;
-  fastSince = spinSince = dizzyUntil = now;
-  spinDir = 0;
-  dose = 0; doseActive = false;
+  fastCond = false;
+  fastSince = dizzyUntil = now;
+  for (int a = 0; a < 3; a++) {
+    swingSide[a] = 0; swingIdx[a] = 0;
+    for (int i = 0; i < SWING_RING; i++) swingAt[a][i] = 0;
+  }
+  spinDir = 0; spinStart = spinLast = now;
   rollSince = stillSince = quietSince = rollHoldSince = now;
   h1 = h2 = GyroRaw{}; histN = 0;
 }
@@ -118,16 +132,42 @@ static void updateFast(uint32_t now) {
   if (now - fastSince >= FAST_HOLD_MS) fastCond = true;
 }
 
-// Enter on one sign held; leave on slowing down, not on a sign flip.
-static void updateSpin(uint32_t now) {
-  float az  = fabsf(m.gz);
-  int   dir = (m.gz > 0) - (m.gz < 0);
-  if (spinCond) {
-    if (az < SPIN_EXIT_DPS) spinCond = false;
-    return;
+// A swing = an axis crossing ±SHAKE_DPS; that side re-arms below SHAKE_REARM_DPS. Each axis
+// counts on its own: enough swings on any one inside the window, and every further swing
+// on it keeps DIZZY going.
+static void updateShakeAxis(int a, float g, uint32_t now) {
+  int8_t side = g > SHAKE_DPS ? 1 : g < -SHAKE_DPS ? -1 : 0;
+  bool swung = side && side != swingSide[a];
+  if (swung) {
+    swingAt[a][swingIdx[a]] = now;
+    swingIdx[a] = (swingIdx[a] + 1) % SWING_RING;
   }
-  if (az < SPIN_ENTER_DPS || dir != spinDir) { spinDir = dir; spinSince = now; return; }
-  if (now - spinSince >= SPIN_HOLD_MS) spinCond = true;
+  if (side) swingSide[a] = side;
+  else if (fabsf(g) < SHAKE_REARM_DPS) swingSide[a] = 0;
+
+  int n = 0;
+  for (int i = 0; i < SWING_RING; i++)
+    if (swingAt[a][i] && now - swingAt[a][i] < SHAKE_WINDOW_MS) n++;
+  m.swings[a] = n;
+  if (swung && n >= SHAKE_SWINGS) dizzyUntil = now + DIZZY_WANT_MS;
+}
+
+static void updateShake(uint32_t now) {
+  updateShakeAxis(0, m.gx, now);
+  updateShakeAxis(1, m.gy, now);
+  updateShakeAxis(2, m.gz, now);
+}
+
+// |gz| held above SPIN_GZ_DPS one way; a reversal starts over, a dip longer than SPIN_DIP_MS
+// ends it.
+static void updateSpin(uint32_t now) {
+  int8_t dir = m.gz > SPIN_GZ_DPS ? 1 : m.gz < -SPIN_GZ_DPS ? -1 : 0;
+  if (dir && dir == spinDir) spinLast = now;
+  else if (dir) { spinDir = dir; spinStart = spinLast = now; }
+  else if (spinDir && now - spinLast > SPIN_DIP_MS) spinDir = 0;
+
+  m.spinMs = spinDir ? spinLast - spinStart : 0;
+  if (dir && m.spinMs >= SPIN_HOLD_MS) dizzyUntil = now + DIZZY_WANT_MS;
 }
 
 // Floor -> hand on unsigned roll travel, hand -> floor on stillness. The accumulator
@@ -149,29 +189,14 @@ static void updateContext(uint32_t now) {
   }
 }
 
-// Accumulate degrees while spinning, spend them as wooze time when the spin stops.
-static void updateDizzyDose(uint32_t now) {
-  if (spinCond) {
-    dose += fabsf(m.gz) * SAMPLE_S;
-  } else if (doseActive) {
-    uint32_t ms = (uint32_t)(dose * DIZZY_MS_PER_DEG);
-    if (ms < DIZZY_MIN_MS) ms = DIZZY_MIN_MS;
-    if (ms > DIZZY_MAX_MS) ms = DIZZY_MAX_MS;
-    dizzyUntil = now + ms;
-    dose = 0;
-  }
-  doseActive = spinCond;
-}
-
 static bool updateState(uint32_t now) {
   // Plain ifs, not #if, so disabled states keep compiling.
-  if (STATE_DIZZY) { updateSpin(now); updateDizzyDose(now); }
+  updateShake(now); updateSpin(now);               // always: the dashboard shows them
   if (USE_GYRO) updateContext(now);
   if (STATE_FAST) updateFast(now);
 
-  CarState want = m.handCtx                        ? (STATE_HAPPY ? HAPPY : NORMAL)
-                : STATE_DIZZY && spinCond          ? DIZZY
-                : STATE_DIZZY && (int32_t)(now - dizzyUntil) < 0 ? DIZZY
+  CarState want = STATE_DIZZY && (int32_t)(now - dizzyUntil) < 0 ? DIZZY
+                : m.handCtx                        ? (STATE_HAPPY ? HAPPY : NORMAL)
                 : STATE_FAST && fastCond           ? FAST
                 :                                    NORMAL;
 
@@ -197,7 +222,15 @@ bool motionUpdate(const GyroRaw &in) {
   sqBuf[winIdx] = sq;
   xBuf[winIdx] = m.gx; yBuf[winIdx] = m.gy; zBuf[winIdx] = m.gz;
   winIdx = (winIdx + 1) % RMS_WINDOW;
-  m.rms = sqrtf(sqSum / RMS_WINDOW);
+  // Running sums drift: a hard shake's squares (~1e6) leave a float rounding residue that
+  // never washes out — rms read NaN at rest and froze FAST on. Re-add once per window.
+  if (winIdx == 0) {
+    sqSum = xSum = ySum = zSum = 0;
+    for (int i = 0; i < RMS_WINDOW; i++) {
+      sqSum += sqBuf[i]; xSum += xBuf[i]; ySum += yBuf[i]; zSum += zBuf[i];
+    }
+  }
+  m.rms = sqrtf(fmaxf(sqSum, 0) / RMS_WINDOW);
 
   // jitter = RMS with the window mean removed: var = E[g²] - E[g]²
   float mx = xSum / RMS_WINDOW, my = ySum / RMS_WINDOW, mz = zSum / RMS_WINDOW;
@@ -207,7 +240,10 @@ bool motionUpdate(const GyroRaw &in) {
   uint32_t now = millis();
 
   // At rest, leak the residual mean into the bias: fixes drift and a bias poisoned at boot.
-  if (m.jitter > REST_JITTER_DPS) restSince = now;
+  // Steady and fast is a spin, not an offset.
+  bool steadySpin = fabsf(mx) > REZERO_MAX_DPS || fabsf(my) > REZERO_MAX_DPS ||
+                    fabsf(mz) > REZERO_MAX_DPS;
+  if (m.jitter > REST_JITTER_DPS || steadySpin) restSince = now;
   else if (now - restSince >= REZERO_AFTER_MS) {
     const float leak = SAMPLE_S / (REZERO_TAU_MS / 1000.0f);
     biasX += mx * leak; biasY += my * leak; biasZ += mz * leak;

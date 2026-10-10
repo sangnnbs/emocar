@@ -26,13 +26,22 @@ static GyroRaw mk(float gx, float gy, float gz) {
   return GyroRaw{ (int16_t)lrintf(gx / K), (int16_t)lrintf(gy / K), (int16_t)lrintf(gz / K) };
 }
 
+static bool sawDizzy;                            // DIZZY shown since the last reset()
+
 // Feed ms worth of samples at SAMPLE_US, advancing the fake clock.
 static void feed(float gx, float gy, float gz, int ms) {
   int n = ms * 1000 / SAMPLE_US;
   for (int i = 0; i < n; i++) {
     fakeMillis += SAMPLE_US / 1000;
     motionUpdate(mk(gx, gy, gz));
+    sawDizzy |= motionGet().state == DIZZY;
   }
+}
+
+// Shaken in a hand: every listed axis reversing each half-period, so each half-period is one
+// gz swing. Measured 2026-10-10 on the dashboard: peaks 300-1095 on all three axes.
+static void shakeFor(float ax, float ay, float az, int halfMs, int ms) {
+  for (int t = 0, s = 1; t < ms; t += halfMs, s = -s) feed(s * ax, -s * ay, s * az, halfMs);
 }
 
 // One sample with `lsb` added to one axis, in raw counts — the torn FIFO read, reproduced
@@ -60,7 +69,14 @@ static void expectCtx(const char *what, bool want) {
          want ? "hand" : "floor", got ? "hand" : "floor");
 }
 
-static void reset() { fakeMillis = 1000; motionReset(); }
+// The bias survives motionReset() (calibration owns it) and the rest-time correction moves
+// it, so zero it here or one scenario's long rest leaks into the next.
+static void reset() { fakeMillis = 1000; motionSetBias(0, 0, 0); motionReset(); sawDizzy = false; }
+static void expectNoDizzy(const char *what) {
+  if (sawDizzy) fails++;
+  printf("  %s %-46s %s\n", sawDizzy ? "FAIL" : "ok  ", what,
+         sawDizzy ? "went DIZZY" : "never DIZZY");
+}
 
 // Boot calibration (P4.1). Samples are generated at SAMPLE_US from f(t) and averaged per
 // CALIB_BLOCK_MS block, exactly as calibrate() does on the board, then fitted.
@@ -202,15 +218,16 @@ int main() {
   expect("brisk waving in hand", HAPPY);
   expectCtx("context while waving", true);
 
-  // --- 5. nothing interrupts HAPPY while the car is held -------------------
-  // In a hand the car is simply happy: no magnitude, however violent, changes that. This
-  // is what deleted the shake path — handling and shaking overlap on every RMS threshold
-  // that was tried (8, then 45, then 120), and none of them ever separated the two.
+  // --- 5. shaken while held -> DIZZY, then back to HAPPY -------------------
   printf("shaken hard while held\n");
-  feed(120.0f, 100.0f, 80.0f, 1500);      // far above anything the old shake path wanted
-  expect("violent shaking, still in a hand", HAPPY);
-  feed(2.0f, 2.0f, 2.0f, 1000);
-  expect("and afterwards", HAPPY);
+  feed(120.0f, 100.0f, 80.0f, 1500);      // loud handling, every axis well under 400
+  expect("loud handling, no swings", HAPPY);
+  shakeFor(450.0f, 350.0f, 450.0f, 125, 1500);   // 12 gx and 12 gz swings in 1.5 s
+  expect("hard shake in a hand", DIZZY);
+  feed(2.0f, 2.0f, 2.0f, 1800);
+  expect("1.8 s after the last swing", DIZZY);
+  feed(2.0f, 2.0f, 2.0f, 300);            // DIZZY_AFTER_MS, step-down included
+  expect("2.1 s after: back to HAPPY, still held", HAPPY);
 
   // --- 6. put back down -> context clears ---------------------------------
   printf("put back down\n");
@@ -219,51 +236,150 @@ int main() {
   feed(0.3f, 0.3f, 0.3f, 1200);           // HAPPY -> NORMAL is down the ladder: EXIT_HOLD_MS
   expect("resting on the desk", NORMAL);
 
-  // --- 7. a real spin on the floor -> DIZZY, dose scales the tail ----------
-  printf("spun on the floor\n");
+  // --- 7. spinning in circles: |gz| > 300 one way for 5 s -------------------
+  printf("driving in circles\n");
   reset();
   feed(0.5f, 0.5f, 0.5f, 1000);
-  feed(2.0f, 1.0f, 120.0f, 3000);         // one sign, 120 dps = 360 deg spun
-  expect("spinning", DIZZY);
-  feed(0.5f, 0.5f, 0.5f, 1500);           // measured rest is 0.5-0.6 per axis
-  expect("1.5 s after the spin (dose ~360 deg -> ~2.9 s)", DIZZY);
-  feed(0.5f, 0.5f, 0.5f, 3000);
-  expect("after the tail is spent", NORMAL);
+  feed(2.0f, 1.0f, 350.0f, 4800);
+  expect("4.8 s of spin: not yet", FAST);
+  feed(2.0f, 1.0f, 350.0f, 500);
+  expect("5.3 s of spin", DIZZY);
   expectCtx("a floor spin must not read as a pickup", false);
+  feed(0.5f, 0.5f, 0.5f, 1800);
+  expect("1.8 s after the spin", DIZZY);
+  feed(0.5f, 0.5f, 0.5f, 300);
+  expect("2.1 s after the spin", NORMAL);
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  printf("  %s %-46s gz reads %.2f\n", fabsf(motionGet().gz - 0.5f) < 0.2f ? "ok  " : "FAIL",
+         "a steady spin is not learned as bias", motionGet().gz);
+  if (fabsf(motionGet().gz - 0.5f) >= 0.2f) fails++;
 
-  // --- 7b. picked up mid-wooze: being held outranks the aftermath ----------
-  printf("picked up while still dizzy\n");
+  printf("circles with short dips under 300 (< SPIN_DIP_MS)\n");
   reset();
   feed(0.5f, 0.5f, 0.5f, 1000);
-  feed(2.0f, 1.0f, 120.0f, 3000);         // spin, arming a long tail
-  feed(0.5f, 0.5f, 0.5f, 500);
-  expect("wooze running", DIZZY);
-  feed(4.0f, 30.0f, 4.0f, 1200);          // lifted off the floor
-  expect("in a hand now, wooze or not", HAPPY);
+  for (int i = 0; i < 6; i++) { feed(2.0f, 1.0f, 350.0f, 850); feed(2.0f, 1.0f, 250.0f, 150); }
+  expect("6 s with 150 ms dips", DIZZY);
 
-  // --- 8. hand shake must not be read as a spin ---------------------------
-  printf("hand shake in yaw must not enter the spin path\n");
+  printf("circles broken by a long dip\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(2.0f, 1.0f, 350.0f, 3000);
+  feed(2.0f, 1.0f, 250.0f, 300);          // longer than SPIN_DIP_MS: starts over
+  feed(2.0f, 1.0f, 350.0f, 3000);
+  expectNoDizzy("3 s + 300 ms dip + 3 s");
+
+  printf("spinning too slowly\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(2.0f, 1.0f, 250.0f, 8000);
+  expectNoDizzy("250 dps for 8 s");
+
+  printf("left for 3 s, then right for 3 s\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(2.0f, 1.0f, -350.0f, 3000);
+  feed(2.0f, 1.0f, 350.0f, 3000);
+  expectNoDizzy("a reversal starts the spin over");
+
+  // --- 7b. shaken, then set straight down: DIZZY plays out on the floor ----
+  printf("shaken, then put down at once\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(4.0f, 30.0f, 4.0f, 1200);          // picked up
+  shakeFor(450.0f, 350.0f, 450.0f, 125, 1000);
+  feed(0.3f, 0.3f, 0.3f, 1500);
+  expect("on the desk, 1.5 s after", DIZZY);
+  feed(0.3f, 0.3f, 0.3f, 2500);
+  expect("4 s after", NORMAL);
+  expectCtx("and back on the floor", false);
+  {
+    float r = motionGet().rms;
+    bool ok = r < 1.0f;                   // NaN fails too
+    if (!ok) fails++;
+    printf("  %s %-46s rms %.2f\n", ok ? "ok  " : "FAIL", "rms back to rest after a 450 dps shake", r);
+  }
+  printf("one 1000 dps shake, then rest\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(1000.0f, 900.0f, 1000.0f, 100, 2000);
+  feed(0.5f, 0.5f, 0.5f, 5000);
+  {
+    float r = motionGet().rms;
+    bool ok = r < 1.0f;
+    if (!ok) fails++;
+    printf("  %s %-46s rms %.2f\n", ok ? "ok  " : "FAIL", "rms back to rest (was NaN before the resum)", r);
+  }
+  expect("and the face with it", NORMAL);
+
+  // --- 7c. what must NOT be a shake (measured pickups: 0-1 gz swings past 400) -
+  printf("the pickup from the 2026-10-10 recording\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(120.0f, 90.0f, 200.0f, 300);
+  feed(-40.0f, -30.0f, -60.0f, 300);
+  feed(0.5f, 0.5f, 0.5f, 1500);
+  expectNoDizzy("pickup, gz 200");
+  printf("yanked out and back twice, gz 600\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  for (int i = 0; i < 2; i++) { feed(100.0f, 50.0f, 600.0f, 150); feed(100.0f, 50.0f, -600.0f, 150); }
+  feed(0.5f, 0.5f, 0.5f, 1500);
+  expectNoDizzy("4 swings: short of SHAKE_SWINGS");
+  printf("hovering around 400 without falling back under 200\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  for (int i = 0; i < 20; i++) { feed(1.0f, 1.0f, 420.0f, 50); feed(1.0f, 1.0f, 380.0f, 50); }
+  expectNoDizzy("one swing, not twenty");
+
+  // --- 7d. counting: 5 swings in 2 s is not enough, 6 is -------------------
+  printf("five swings, then six\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(0.0f, 0.0f, 450.0f, 300, 1500);       // 5 swings
+  feed(0.5f, 0.5f, 0.5f, 2500);
+  expectNoDizzy("5 swings in 1.5 s");
+  shakeFor(0.0f, 0.0f, 450.0f, 300, 1800);       // 6 swings
+  expect("6 swings in 1.8 s", DIZZY);
+  printf("shaken on gx only, then gy only\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(450.0f, 0.0f, 0.0f, 125, 1000);       // 8 gx swings
+  expect("gx-only shake", DIZZY);
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(0.0f, 450.0f, 0.0f, 125, 1000);       // 8 gy swings
+  expect("gy-only shake", DIZZY);
+  printf("4 swings on gx and 4 on gy at once: 8 in all, no axis at 6\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(450.0f, 450.0f, 0.0f, 125, 500);
+  feed(0.5f, 0.5f, 0.5f, 2500);
+  expectNoDizzy("axes are counted separately, never added");
+  printf("six swings spread over 3 s\n");
+  reset();
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(0.0f, 0.0f, 450.0f, 500, 3000);
+  expectNoDizzy("6 swings, but never 6 inside 2 s");
+
+  // --- 8. a wiggle is not a shake --------------------------------------------
+  printf("wiggled in yaw: reversing, but under 400\n");
   reset();
   feed(0.5f, 0.5f, 0.5f, 1000);
   for (int i = 0; i < 12; i++) feed(1.0f, 1.0f, i % 2 ? 60.0f : -60.0f, 100);
-  printf("  %s spin path stayed closed (sign flips every 100 ms)\n", spinCond ? "FAIL" : "ok  ");
-  if (spinCond) fails++;
-  expect("a shaken car on the floor is not dizzy, just busy", FAST);
+  expectNoDizzy("+-60 dps every 100 ms");
+  expect("a wiggled car on the floor is not dizzy, just busy", FAST);
 
-  // --- 8b. the ring of a knock is not a spin ------------------------------
-  // An impulse leaves the gyro ringing: big |gz|, alternating, dying out. Fast enough that
-  // no single direction survives SPIN_HOLD_MS.
-  printf("knocked on the table: the ring must not read as a spin\n");
+  // --- 8b. the ring of a knock is not a shake -----------------------------
+  printf("knocked on the table\n");
   reset();
   feed(0.5f, 0.5f, 0.5f, 1000);
   for (int i = 0; i < 6; i++) {
-    float a = 200.0f / (1 << i);          // decaying ring, 50 ms per half-cycle
+    float a = 600.0f / (1 << i);          // decaying ring, 50 ms per half-cycle
     feed(a * 0.5f, a * 0.5f, i % 2 ? a : -a, 50);
   }
-  printf("  %s spin path stayed closed through the ring\n", spinCond ? "FAIL" : "ok  ");
-  if (spinCond) fails++;
   feed(0.5f, 0.5f, 0.5f, 1500);
-  expect("a knock leaves no wooze behind", NORMAL);
+  expectNoDizzy("ring from 600 dps: 1 swing past 400");
+  expect("a knock leaves nothing behind", NORMAL);
 
   // --- 9. fast attack, slow decay (P1) ------------------------------------
   // The same threshold crossed in both directions must not take the same time: going up

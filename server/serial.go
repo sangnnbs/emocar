@@ -1,12 +1,12 @@
 // serial.go — the link to the car: one USB serial port, held open, reconnecting
 // by itself when the cable is pulled or the car is reflashed.
 //
-// Current firmware prints nothing but this protocol, but older builds also print
-// telemetry on the port, so reading a reply means skipping lines until one starts
-// with a protocol word.
+// The firmware also prints debug lines on the port (DEBUG_LOG in config.h), so
+// reading a reply means skipping lines until one starts with a protocol word.
 //
 //	STATUS         -> OK {json}
-//	GET <n>        -> OK <len> + <len> raw bytes
+//	ZERO           -> OK (telemetry orientation restarts from the current pose)
+//	GET <n>       -> OK <len> + <len> raw bytes
 //	PUT <n> <len>  -> READY <chunk>, then one chunk at a time, each answered
 //	                  ACK <got> when it is on flash, and OK <bytes> at the end
 package main
@@ -45,6 +45,7 @@ type carLink struct {
 	path string // what is actually open
 	port serial.Port
 	buf  []byte // bytes read from the port but not yet consumed
+	feed feed   // the dashboard's listeners, see telemetry.go
 }
 
 func newCarLink(want string) *carLink { return &carLink{want: want} }
@@ -168,11 +169,12 @@ func (l *carLink) reply(deadline time.Time) (string, string, error) {
 }
 
 // drain throws away whatever the car printed since the last command, so a reply is
-// never matched against a stale line.
+// never matched against a stale line. Time-boxed: telemetry every TELEMETRY_MS means
+// the port never goes quiet, and reply() skips those lines anyway.
 func (l *carLink) drain() {
 	l.buf = nil
 	tmp := make([]byte, 4096)
-	for {
+	for end := time.Now().Add(readPoll); time.Now().Before(end); {
 		n, err := l.port.Read(tmp)
 		if n == 0 || err != nil {
 			return

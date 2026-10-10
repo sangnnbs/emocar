@@ -6,6 +6,7 @@
 #include "cmd.h"
 #include "anim.h"
 #include "motion.h"
+#include "telem.h"
 
 static void replyErr(const char *msg) { Serial.printf("ERR %s\n", msg); }
 
@@ -121,6 +122,9 @@ static void handleLine(char *line) {
 
   if (fields >= 1 && !strcmp(verb, "STATUS")) {
     handleStatus();
+  } else if (fields >= 1 && !strcmp(verb, "ZERO")) {
+    telemZero();
+    Serial.printf("OK\n");
   } else if (slot < 0 || slot >= CAR_STATE_COUNT) {
     replyErr("bad slot");
   } else if (fields == 2 && !strcmp(verb, "GET")) {

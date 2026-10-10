@@ -7,20 +7,20 @@ A face on the car that reacts to how it moves. ESP32-C3 Super Mini + L3G4200D (G
 |---|---|---|
 | NORMAL | 🙂 | default |
 | FAST | 😮 | 3-axis vibration RMS > `FAST_ENTER_RMS`, sustained `FAST_HOLD_MS` |
-| DIZZY | 🥴 | \|gz\| > `SPIN_ENTER_DPS`, one sign, for `SPIN_HOLD_MS` — plus a wooze tail ∝ degrees spun |
+| DIZZY | 🥴 | `SHAKE_SWINGS` swings past ±`SHAKE_DPS` within `SHAKE_WINDOW_MS` on any one axis, or \|gz\| > `SPIN_GZ_DPS` one way for `SPIN_HOLD_MS` — shown until `DIZZY_AFTER_MS` after it stops |
 | HAPPY | 🥰 | in a hand: `HAND_TILT_DEG` of roll travel, which a car on wheels cannot make |
 
-Priority HAPPY > DIZZY > FAST > NORMAL. HAPPY is first because it says *where the car is*,
-and while it is held nothing else applies — so FAST and DIZZY only ever have to describe a
-car on a surface. Every condition has hysteresis (`*_EXIT_*`) and must hold long enough to
+Priority DIZZY > HAPPY > FAST > NORMAL. HAPPY says *where the car is*, and while it is held
+FAST doesn't apply — so FAST only ever has to describe a car on a surface. DIZZY sits above
+it because a shake happens in a hand: below HAPPY it could never show. Every condition has hysteresis (`*_EXIT_*`) and must hold long enough to
 prove itself: a fingernail is louder than anything the car does, and only its shortness
 tells it apart. The ladder itself is fast going up (`ENTER_HOLD_MS`) and slow coming down
 (`EXIT_HOLD_MS`), so a reaction is instant and a feeling wears off.
 
-**MVP: only NORMAL is registered.** Each other state has a flag in config.h (`STATE_FAST`,
-`STATE_DIZZY`, `STATE_HAPPY`, all `0` for now). An unregistered state never shows and its
+**Registered states.** Each state but NORMAL has a flag in config.h (`STATE_FAST`,
+`STATE_DIZZY`, `STATE_HAPPY`; DIZZY + HAPPY on as of 2026-10-10). An unregistered state never shows and its
 detector does not run; set the flag to `1` to bring it back. With HAPPY off, a car held in
-a hand shows NORMAL, never FAST or DIZZY. The host tests register all four.
+a hand shows NORMAL, never FAST. The host tests register all four.
 With only NORMAL registered the gyro is not started at all (`USE_GYRO`, derived): the car
 boots straight to 🙂 with or without a working gyro.
 
@@ -96,9 +96,13 @@ The MVP (NORMAL only) skips calibration entirely, so it goes splash → 🙂. `G
 the checklist in wiring.md. The car keeps retrying every 2 s, so reseating the wire is enough;
 no reset needed. During an upload the OLED shows `UPDATING` for a second or two.
 
-The firmware prints no logs: serial (115200) carries only the animation upload protocol
-(`cmd.*`), whose replies are the lines starting `OK` / `ERR` / `READY` / `ACK`. Faults show
-on the OLED. For live gyro numbers while tuning, use the `../L3G4200D` telemetry sketch.
+Serial (115200) carries the animation upload protocol (`cmd.*`), whose replies are the
+lines starting `OK` / `ERR` / `READY` / `ACK`. With `DEBUG_LOG 1` in config.h the firmware
+also prints debug lines: boot, calibration, gyro faults, `>>> OLD -> NEW` on every state
+change, and every `DEBUG_PRINT_MS` a line of `gx gy gz | peak |gx| |gy| |gz| | rms |
+ctx roll | swings x/y/z spin-ms | state`. Faults also show on the OLED. With `TELEMETRY 1` (telem.*) it
+also prints a `T ...` sensor line every 40 ms for the server's sensor dashboard
+(`/dashboard`).
 
 ⚠️ The calibration window is where things go wrong silently: if the car is moving during
 those 1.5 s the motion is averaged into the zero-rate bias, and every reading afterwards
@@ -184,23 +188,20 @@ watchdog: say what is wrong, keep trying, come back by itself.
 
 ### The priority ladder
 
-The commit hold depends on which way the state moves along the ladder (HAPPY > DIZZY >
+The commit hold depends on which way the state moves along the ladder (DIZZY > HAPPY >
 FAST > NORMAL): going up takes `ENTER_HOLD_MS`, coming down `EXIT_HOLD_MS`. Fast attack,
 slow decay — a startle is instant, calming down lingers, and a big reaction does not snap
 off as if nothing happened. These holds gate the state flip, not the conditions.
 
 The ladder rank lives in `PRIORITY[]`, separate from the enum, because the enum is slot
-order and append-only. They are identical today by coincidence; the next state added
-(STARTLED, say) would sit above FAST at slot 4 and break it immediately. HAPPY is on top
-because it is not an intensity at all — it reports *where the car is*, which outranks
-anything about how it is moving.
+order and append-only: DIZZY is slot 2 but ranks above HAPPY (slot 3). HAPPY outranks
+FAST because it reports *where the car is*; DIZZY outranks HAPPY because shaking only
+happens in a hand, so anything below HAPPY could never show it.
 
 ### FAST
 
-FAST and DIZZY are *floor* states: the context bit decides the situation first, so no
-threshold has to be chosen to avoid being tripped by handling. That is why the old shake
-path is gone — it keyed on RMS magnitude, which handling and shaking share, and no value
-ever separated them (spec'd 8, then 45, then 120, never confirmed).
+FAST is a *floor* state: the context bit decides the situation first, so no threshold has
+to be chosen to avoid being tripped by handling.
 
 `FAST_ENTER_RMS` went 4.0 → 2.5 once the context bit took over, then back to 4.0 on
 2026-09-20: on the real car a fingernail tap, a nudge or a knock on the table read as FAST.
@@ -217,18 +218,35 @@ out on its own now, which the 2.5 experiment did not have.
 
 ### DIZZY
 
-A real spin holds one sign of gz, which a wobble or a bump cannot fake. Leaving takes
-slowing down below `SPIN_EXIT_DPS`, not a sign flip — otherwise every wobble mid-spin would
-end it. `SPIN_HOLD_MS` went 200 → 300 ms on 2026-09-20, same reasoning as `FAST_HOLD_MS`:
-an impulse rings the gyro in alternating directions, so the longer one sign has to survive,
-the less a knock looks like a turn. 300 ms at the entry rate is ~15° of real rotation —
-past a nudge, nowhere near a hand spinning the car. The entry rate is deliberately
-unchanged: the only figure for a real spin is |gz| ≈ 60 (older tinicar, unconfirmed), and
-raising 40 toward it risks missing the gesture. If a nudge still reads as DIZZY, raise it to
-60 next, not the hold.
+Two triggers:
 
-The aftermath is a dose: Σ|gz|·dt over the spin — degrees actually spun — spent as screen
-time (`DIZZY_MS_PER_DEG`, clamped to `DIZZY_MIN_MS`…`DIZZY_MAX_MS`) when it stops.
+- **Shake:** `SHAKE_SWINGS` (6) swings past ±`SHAKE_DPS` (400), either direction, within
+  `SHAKE_WINDOW_MS` (2 s), on any one of gx, gy, gz. Each axis counts on its own; counts are
+  never added across axes. A swing is the axis crossing the line; that side only counts again
+  once it falls back under `SHAKE_REARM_DPS` (200), so hovering around 400 is one swing.
+- **Spin:** |gz| above `SPIN_GZ_DPS` (300) one way for `SPIN_HOLD_MS` (5 s): the car driving
+  in circles. A dip shorter than `SPIN_DIP_MS` (200 ms) doesn't break it; a reversal starts over.
+
+DIZZY shows from the trigger until `DIZZY_AFTER_MS` (2 s) after the last swing or the end of
+the spin, step-down included. It outranks HAPPY: shaken in a hand, the car goes dizzy, then
+back to HAPPY.
+
+Recorded on the car with the dashboard on 2026-10-10 (one peak per 40 ms, so the car sees a
+little more):
+
+| Motion | rms | peaks | swings past 400, best 2 s (gx/gy/gz) |
+|---|---|---|---|
+| held still in a hand | ≤ 80 | ≤ 110 | 0/0/0 |
+| pickup / put down | 83–257 | 101–403 | 0/0/1 |
+| hard shake | 300–787 | 300–1095, all axes | 10/11/5 |
+
+gz alone missed that shake (5 < 6), which is why every axis counts. Its gentler second half
+reached 6 on no axis, so DIZZY ended about 5 s before the shaking did.
+
+The spin numbers are not measured yet. A steady spin has almost no jitter, so the rest-time
+bias correction is also gated on a small mean (`REZERO_MAX_DPS`); otherwise a 5 s spin was
+being learned as bias. Earlier DIZZY rules — a floor spin at 40 dps, then rms + any-axis flips
+— are in git history.
 
 ### Context bit — floor vs hand
 
@@ -260,13 +278,14 @@ Measured 2026-09-06 on the bare board:
 | held in a palm, casual | rms p50 35, p90 75, spikes to 255 |
 | a pickup / yank burst | rms 150–380, gz pk 400–730 |
 | car rolling (tinicar, unconfirmed) | pk ≈ 6; spin \|gz\| ≈ 60 |
+| hard shake in a hand (2026-10-10) | rms 300–787, peaks to 1095, swings past 400 in 2 s gx 10 / gy 11 / gz 5 |
 
 ### Registered states
 
 Detectors are gated with plain `if (STATE_X)`, not `#if`: the compiler drops the dead
 calls, but a disabled state keeps compiling and cannot rot while it waits. The context bit
 runs whenever any of FAST/DIZZY/HAPPY is on, not just HAPPY — it is also what keeps FAST
-and DIZZY off while the car is in a hand. With only NORMAL registered the gyro is never
+off while the car is in a hand. With only NORMAL registered the gyro is never
 started, so a missing or dead gyro cannot hold the display, or USB uploads, hostage on an
 error screen.
 
@@ -300,7 +319,10 @@ make -C test test        # compiles motion.cpp with a stub Arduino.h and asserts
 
 Scenarios cover the four states and the floor/hand context bit: pushed on the floor must
 not read as held, a pickup must reach HAPPY and stay there however violently it is then
-handled, a floor spin must reach DIZZY and leave a tail proportional to the degrees spun,
-and a hand shake in yaw must not be mistaken for a spin.
+handled *except* by a shake on any axis or a 5 s gz spin, which reach DIZZY for 2 s past the motion.
+Pickups, two yanks out and back, gz hovering at 400, 5 swings, 6 swings over 3 s, 4 + 4
+swings split across two axes, a slow or
+broken or reversing spin, a wiggle and a knock must not reach DIZZY. A steady spin must not
+be learned as bias, and rms must come back to rest after a hard shake (it used to go NaN).
 The blind spot is the magnitudes — a scenario is only as honest as the numbers fed into
 it, so thresholds still have to be confirmed on real hardware (PLANS.md P5).

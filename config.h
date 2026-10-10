@@ -34,6 +34,18 @@
 // ---------- serial ----------
 #define SERIAL_BAUD 115200
 
+// ---------- debug log ----------
+// 1 = print debug lines on serial: boot, calibration, gyro faults, state changes and a
+// gyro line every DEBUG_PRINT_MS. The server skips any line that isn't a protocol reply.
+#define DEBUG_LOG        1
+#define DEBUG_PRINT_MS   200
+
+// ---------- telemetry ----------
+// 1 = print a `T ...` sensor line every TELEMETRY_MS for the server's /dashboard (format in
+// telem.h). Lines nobody reads are dropped, never blocking the loop. Needs the gyro on.
+#define TELEMETRY        1
+#define TELEMETRY_MS     40
+
 // ---------- gyro sampling ----------
 #define SAMPLE_US   5000      // 10000, 5000, 2500 or 1250 (the gyro's own ODR)
 #define GYRO_FS_DPS 2000      // full scale: 250, 500 or 2000
@@ -52,6 +64,8 @@
 #define REST_JITTER_DPS  1.5f   // wobble below this = the car is not being moved
 #define REZERO_AFTER_MS  3000   // ...and after this long at rest, start correcting the bias
 #define REZERO_TAU_MS   20000   // time constant of that correction
+#define REZERO_MAX_DPS   30.0f  // ...but only on a mean below this: a steady spin has no
+                                // jitter either, and must not be learned as bias
 
 // Median-of-3 filter against the torn FIFO reads (one axis off by exactly 256 LSB for one
 // sample). BDU does not cover samples read through the FIFO.
@@ -85,7 +99,7 @@
 #define STATE_DIZZY  1
 #endif
 #ifndef STATE_HAPPY
-#define STATE_HAPPY  0
+#define STATE_HAPPY  1
 #endif
 
 // ---------- motion state machine ----------
@@ -95,7 +109,7 @@
 //   a pickup/yank burst    rms 150-380, gz pk 400-730
 #define RMS_WINDOW_MS    250    // vibration RMS window
 
-// Fast attack, slow decay along the priority ladder (HAPPY > DIZZY > FAST > NORMAL).
+// Fast attack, slow decay along the priority ladder (DIZZY > HAPPY > FAST > NORMAL).
 #define ENTER_HOLD_MS    200    // moving up the ladder
 #define EXIT_HOLD_MS    1000    // moving down
 
@@ -105,16 +119,25 @@
 #define FAST_EXIT_RMS    2.5f   // vibration RMS below which FAST is left
 #define FAST_HOLD_MS     500    // rms above FAST_ENTER_RMS this long = really moving
 
-// DIZZY — a spin on the floor: |gz| holding one sign. If a nudge reads as DIZZY, raise
-// SPIN_ENTER_DPS toward 60 before touching the hold.
-#define SPIN_ENTER_DPS  40.0f
-#define SPIN_EXIT_DPS   25.0f   // a sign flip does not end the spin, slowing down does
-#define SPIN_HOLD_MS     300
+// DIZZY — in a hand or not; outranks HAPPY. Two triggers:
+//   shake  SHAKE_SWINGS swings past ±SHAKE_DPS within SHAKE_WINDOW_MS on any one axis (gx, gy
+//          and gz count separately, never added). A swing is the axis crossing the line; it
+//          must fall back under SHAKE_REARM_DPS before the same side counts again.
+//          Measured 2026-10-10, best 2 s of a hard shake (40 ms peaks, so the car sees
+//          more): gx 10, gy 11, gz 5 swings; pickups 0 on gx/gy, 1 on gz; holding 0.
+//   spin   |gz| above SPIN_GZ_DPS one way for SPIN_HOLD_MS — the car driving in circles.
+//          Dips shorter than SPIN_DIP_MS don't break it. Not yet measured on the car.
+#define SHAKE_DPS       400.0f
+#define SHAKE_REARM_DPS 200.0f
+#define SHAKE_SWINGS        6
+#define SHAKE_WINDOW_MS  2000
+#define SPIN_GZ_DPS     300.0f
+#define SPIN_HOLD_MS     5000
+#define SPIN_DIP_MS       200
 
-// DIZZY aftermath, proportional to the degrees spun.
-#define DIZZY_MS_PER_DEG 8.0f
-#define DIZZY_MIN_MS     1000
-#define DIZZY_MAX_MS     8000
+// How long DIZZY shows after the last swing / the end of the spin, step-down
+// (EXIT_HOLD_MS) included.
+#define DIZZY_AFTER_MS   2000
 
 // Context bit — floor vs hand. Enter on unsigned roll travel (a car on wheels peaks at
 // ~6 dps roll, a hand turns it constantly), leave on stillness.
