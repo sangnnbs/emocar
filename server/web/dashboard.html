@@ -379,7 +379,7 @@ function render() {
   const stale = online && !paused && performance.now() - lastAt > STALE_MS;
   $('livedot').className = 'dot' + (paused ? ' paused' : stale || !hist.length ? '' : ' on');
   $('warn').textContent = !online ? '' : stale
-    ? 'car connected but sends no telemetry — flash firmware with TELEMETRY 1 and a STATE_* besides NORMAL' : '';
+    ? 'car connected but sends no telemetry — it may be rebooting (a few seconds), or its firmware predates TELEM / has the gyro off' : '';
   if (!dirty) return;
   dirty = false;
 

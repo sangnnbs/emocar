@@ -89,20 +89,20 @@ arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
 The upload server owns the same port while it runs — stop it (`make -C server down`)
 before flashing or opening a monitor.
 
-Boot sequence on the OLED: `emocar` splash → `CALIBRATING keep still`
+Boot sequence on the OLED: blank → `CALIBRATING keep still`
 (1.5 s, car on the floor; a tap or a bump is fine, being picked up makes it wait) → 🙂.
-`CALIB_UI 0` (the default) hides the calibration screen: the splash stays up through it.
-The MVP (NORMAL only) skips calibration entirely, so it goes splash → 🙂. `GYRO ERROR` means no ACK at 0x69, wrong WHO_AM_I or no data — see
+`CALIB_UI 0` (the default) hides the calibration screen: the panel stays blank through it.
+With only NORMAL registered calibration is skipped entirely, so it goes blank → 🙂. `GYRO ERROR` means no ACK at 0x69, wrong WHO_AM_I or no data — see
 the checklist in wiring.md. The car keeps retrying every 2 s, so reseating the wire is enough;
 no reset needed. During an upload the OLED shows `UPDATING` for a second or two.
 
 Serial (115200) carries the animation upload protocol (`cmd.*`), whose replies are the
-lines starting `OK` / `ERR` / `READY` / `ACK`. With `DEBUG_LOG 1` in config.h the firmware
-also prints debug lines: boot, calibration, gyro faults, `>>> OLD -> NEW` on every state
+lines starting `OK` / `ERR` / `READY` / `ACK`. Production builds print nothing else.
+For development, `DEBUG_LOG 1` in config.h adds debug lines: boot, calibration, gyro faults, `>>> OLD -> NEW` on every state
 change, and every `DEBUG_PRINT_MS` a line of `gx gy gz | peak |gx| |gy| |gz| | rms |
-ctx roll | swings x/y/z spin-ms | state`. Faults also show on the OLED. With `TELEMETRY 1` (telem.*) it
-also prints a `T ...` sensor line every 40 ms for the server's sensor dashboard
-(`/dashboard`).
+ctx roll | swings x/y/z spin-ms | state`. Faults also show on the OLED. The sensor stream
+for the server's dashboard (`/dashboard`, telem.*) runs only while the server asks for it
+(`TELEM`), so a car nobody is watching stays silent.
 
 ⚠️ The calibration window is where things go wrong silently: if the car is moving during
 those 1.5 s the motion is averaged into the zero-rate bias, and every reading afterwards
@@ -133,8 +133,9 @@ a time, so a disturbance delays calibration and never restarts it.
 A gyro that answers on I²C but delivers no samples (a wedged chip does the one without the
 other) fails calibration and is re-initialised.
 
-`CALIB_UI 0` (2026-09-26, MVP): the splash stays up until the face appears instead of
-showing `CALIBRATING`. `GYRO ERROR` screens are unaffected — those say something is broken,
+`CALIB_UI 0` (2026-09-26, MVP): the panel shows nothing until the face appears instead of
+showing `CALIBRATING`. The `emocar` splash with the pin numbers was dropped for production
+on 2026-10-10. `GYRO ERROR` screens are unaffected — those say something is broken,
 not that the car is busy.
 
 ### Jitter and re-zeroing (P4.2)

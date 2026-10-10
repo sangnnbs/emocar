@@ -100,8 +100,6 @@ void setup() {
   LittleFS.begin(true);            // true = format on first mount; on failure placeholders play
 
   animBegin();
-  animMessage("emocar", "USB anim upload", "SDA 8 / SCL 9");
-  delay(500);
   DBG("\nemocar: states NORMAL%s%s%s, gyro %s\n", STATE_FAST ? " FAST" : "",
       STATE_DIZZY ? " DIZZY" : "", STATE_HAPPY ? " HAPPY" : "", USE_GYRO ? "on" : "off");
 

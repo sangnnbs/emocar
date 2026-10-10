@@ -122,6 +122,8 @@ static void handleLine(char *line) {
 
   if (fields >= 1 && !strcmp(verb, "STATUS")) {
     handleStatus();
+  } else if (fields == 2 && !strcmp(verb, "TELEM")) {
+    telemLease(slot);                  // no reply: the T lines are the answer
   } else if (fields >= 1 && !strcmp(verb, "ZERO")) {
     telemZero();
     Serial.printf("OK\n");

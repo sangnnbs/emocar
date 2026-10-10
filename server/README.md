@@ -80,8 +80,9 @@ sequence, so touching them would reboot the car every time the server connected.
   for hand/floor). **Zero** makes the current pose 0° on every axis. The orientation is
   every rotation added up, so it drifts a few degrees a minute: Zero again when it wanders.
   **Pause** (or Space) freezes the view so you can read it. Data keeps arriving behind it.
-  Hover a chart to read any moment. The car needs `TELEMETRY 1` and at least one
-  `STATE_*` besides NORMAL in config.h, otherwise the gyro isn't running.
+  Hover a chart to read any moment. The car streams only while a dashboard is open (see
+  `TELEM` below), and needs at least one `STATE_*` besides NORMAL in config.h, otherwise
+  the gyro isn't running.
 
 The car stores only the four active animations (LittleFS `/anim0..3.qgif`); the library
 never leaves the PC. Uploads survive power cycles and firmware reflashes.
@@ -96,19 +97,23 @@ never buffered in RAM.
 |---|---|
 | `STATUS` | `OK {state, heap, uptime, profile, w, h, format, slots:[{file,frames,bytes}×4]}` |
 | `ZERO` | `OK`; the telemetry orientation restarts from the current pose |
+| `TELEM <s>` | no reply; the car streams telemetry for `<s>` seconds (max 60), `0` stops |
 | `GET <n>` | `OK <len>` + `<len>` raw bytes (`ERR placeholder in use` when the slot has no file) |
 | `PUT <n> <len>` | `READY <chunk>`, then the payload one chunk at a time, each answered `ACK <got>` once it is on flash, and `OK <bytes>` at the end |
 
-Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. The firmware also prints
-debug lines on the same port (`DEBUG_LOG` in config.h), so a client reads past any line
-that doesn't start with one of those four words.
+Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. The port can also carry
+telemetry and, in development builds (`DEBUG_LOG 1`), debug lines, so a client reads past
+any line that doesn't start with one of those four words.
 
-With `TELEMETRY 1` the car also prints a sensor line every `TELEMETRY_MS` (40 ms):
+While a `TELEM` lease is live the car prints a sensor line every `TELEMETRY_MS` (40 ms):
 `T <ms> <gx> <gy> <gz> <qw> <qx> <qy> <qz> <rms> <jitter> <rollAcc> <F|H> <sx/sy/sz> <state> <spinMs>`
-(fields explained in the firmware's `telem.h`). While a dashboard is open, the server keeps
-reading the port between commands and streams those lines to the page as server-sent
-events (`/api/telemetry`). Because the port is never quiet now, the pre-command drain is
-capped at 100 ms.
+(fields explained in the firmware's `telem.h`). While a dashboard is open, the server sends
+`TELEM 10` every 3 s, keeps reading the port between commands and streams those lines to
+the page as server-sent events (`/api/telemetry`); when the last dashboard closes it sends
+`TELEM 0`. A server that dies stops the stream within 10 s, and a car that reboots is picked
+up by the next renewal. `TELEM` has no reply on purpose: a late `OK` could be mistaken for
+the next command's answer. Because the port is never quiet while streaming, the
+pre-command drain is capped at 100 ms.
 
 **The chunking is not optional**, and any other client (a Web Serial page, say) has to do
 the same. USB CDC looks reliable but isn't, end to end: the C3 driver's interrupt pushes

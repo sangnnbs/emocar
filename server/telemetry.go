@@ -2,20 +2,31 @@
 // goroutine keeps reading the port between commands and fans the car's `T ...` lines
 // (format in the firmware's telem.h) out to every listener. With nobody listening the
 // port is only touched by commands, as before.
+//
+// The car streams only on a lease: the pump sends `TELEM <leaseSecs>` every leaseRenew
+// (and at once on a fresh port), and `TELEM 0` when the last listener leaves. A server
+// that dies stops the stream within leaseSecs; a car that reboots is picked up by the
+// next renewal. TELEM has no reply, so nothing is left behind for the next command.
 package main
 
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
+
+	"go.bug.st/serial"
 )
 
 const (
-	subQueue  = 64          // lines buffered per listener; a slow one loses lines, not the feed
-	maxBuffer = 64 << 10    // drop unterminated junk past this
-	retryLink = time.Second // between attempts to find the car
+	subQueue   = 64          // lines buffered per listener; a slow one loses lines, not the feed
+	maxBuffer  = 64 << 10    // drop unterminated junk past this
+	retryLink  = time.Second // between attempts to find the car
+	leaseSecs  = 10
+	leaseRenew = 3 * time.Second
 )
 
 type feed struct {
@@ -23,6 +34,10 @@ type feed struct {
 	subs    map[chan string]struct{}
 	pumping bool
 	link    string // last "link" event, replayed to each new listener
+
+	// the port the last lease went to, and when (guarded by carLink.mu, not mu)
+	leasedPort serial.Port
+	leasedAt   time.Time
 }
 
 // Subscribe returns a stream of ready-to-send SSE events and a cancel func.
@@ -34,6 +49,7 @@ func (l *carLink) Subscribe() (<-chan string, func()) {
 		f.subs = map[chan string]struct{}{}
 	}
 	f.subs[ch] = struct{}{}
+	log.Printf("telemetry: dashboard connected (%d open)", len(f.subs))
 	if f.link != "" {
 		ch <- f.link
 	}
@@ -45,6 +61,7 @@ func (l *carLink) Subscribe() (<-chan string, func()) {
 	return ch, func() {
 		f.mu.Lock()
 		delete(f.subs, ch)
+		log.Printf("telemetry: dashboard closed (%d open)", len(f.subs))
 		f.mu.Unlock()
 	}
 }
@@ -95,6 +112,13 @@ func (l *carLink) pump() {
 			time.Sleep(retryLink)
 		}
 	}
+	l.mu.Lock()
+	if l.port != nil {
+		l.port.Write([]byte("TELEM 0\n"))
+		log.Printf("telemetry: no dashboard open, car told to stop")
+	}
+	l.feed.leasedPort = nil
+	l.mu.Unlock()
 }
 
 // readTelemetry holds the port for one read (readPoll at most), so a command waiting
@@ -104,6 +128,13 @@ func (l *carLink) readTelemetry() (string, error) {
 	defer l.mu.Unlock()
 	if err := l.open(); err != nil {
 		return "", err
+	}
+	if f := &l.feed; f.leasedPort != l.port || time.Since(f.leasedAt) >= leaseRenew {
+		if _, err := l.port.Write([]byte(fmt.Sprintf("TELEM %d\n", leaseSecs))); err != nil {
+			l.close(err)
+			return "", err
+		}
+		f.leasedPort, f.leasedAt = l.port, time.Now()
 	}
 	if err := l.fill(time.Now()); err != nil && err != errTimeout {
 		l.close(err)

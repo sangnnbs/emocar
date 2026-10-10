@@ -1,11 +1,12 @@
 // serial.go — the link to the car: one USB serial port, held open, reconnecting
 // by itself when the cable is pulled or the car is reflashed.
 //
-// The firmware also prints debug lines on the port (DEBUG_LOG in config.h), so
-// reading a reply means skipping lines until one starts with a protocol word.
+// The firmware may also print telemetry and debug lines on the port, so reading a reply
+// means skipping lines until one starts with a protocol word.
 //
 //	STATUS         -> OK {json}
 //	ZERO           -> OK (telemetry orientation restarts from the current pose)
+//	TELEM <s>      -> no reply; telemetry for <s> seconds (telemetry.go)
 //	GET <n>       -> OK <len> + <len> raw bytes
 //	PUT <n> <len>  -> READY <chunk>, then one chunk at a time, each answered
 //	                  ACK <got> when it is on flash, and OK <bytes> at the end

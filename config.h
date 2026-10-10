@@ -37,14 +37,16 @@
 // ---------- debug log ----------
 // 1 = print debug lines on serial: boot, calibration, gyro faults, state changes and a
 // gyro line every DEBUG_PRINT_MS. The server skips any line that isn't a protocol reply.
-#define DEBUG_LOG        1
+#define DEBUG_LOG        0
 #define DEBUG_PRINT_MS   200
 
 // ---------- telemetry ----------
-// 1 = print a `T ...` sensor line every TELEMETRY_MS for the server's /dashboard (format in
-// telem.h). Lines nobody reads are dropped, never blocking the loop. Needs the gyro on.
+// 1 = the car can stream a `T ...` sensor line every TELEMETRY_MS for the server's /dashboard
+// (format in telem.h) — but only while the server holds a lease (`TELEM <s>`, see cmd.h), so
+// a car nobody watches sends nothing and integrates nothing. Needs the gyro on.
 #define TELEMETRY        1
 #define TELEMETRY_MS     40
+#define TELEM_LEASE_MAX_S 60    // longest lease the car accepts
 
 // ---------- gyro sampling ----------
 #define SAMPLE_US   5000      // 10000, 5000, 2500 or 1250 (the gyro's own ODR)
