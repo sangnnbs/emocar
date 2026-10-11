@@ -80,6 +80,42 @@ The player never blocks: a frame is drawn when its delay elapses, and the gyro F
 = 160 ms at 200 Hz) rides out the ~25 ms an SH1106 frame takes on the bus. A state change
 restarts the new animation at frame 0 immediately.
 
+## Run a release build
+
+Downloads: https://github.com/sangnnbs/emocar/releases (latest at the top).
+
+### Server — the PC web UI
+
+Put the file in a folder of its own (the server creates `gifs/` next to it for your GIF
+library), plug the car in over USB, start it. The browser opens http://localhost:8080 by
+itself; if it doesn't, open that address. `-open=false` skips it.
+
+| OS | File | Start / stop |
+|---|---|---|
+| Windows x64 | `emocar-server_<ver>_windows_amd64.exe` | double-click; SmartScreen (unsigned): **More info → Run anyway**. Close the console window to stop |
+| Linux x64 | `emocar-server_<ver>_linux_amd64` | `chmod +x emocar-server_*` then `./emocar-server_<ver>_linux_amd64`; Ctrl+C stops |
+| Linux ARM64 (Raspberry Pi 4/5, …) | `emocar-server_<ver>_linux_arm64` | same as Linux x64 |
+| macOS | — | not built yet: `cd server && go build` on the Mac |
+
+Linux, once per PC, so the server may open the USB port: `sudo usermod -aG dialout $USER`,
+then log out and back in.
+
+### Firmware — the car (ESP32-C3)
+
+Stop the server first: it holds the USB port.
+
+| File | Flash at | For |
+|---|---|---|
+| `emocar-firmware_<ver>_esp32c3_app.bin` | `0x10000` | **updating a car** — keeps the uploaded GIFs and /configs values |
+| `emocar-firmware_<ver>_esp32c3_full.bin` | `0x0` | **a blank board** — bootloader + partitions + app; covers all 4 MB, so it wipes GIFs and saved values |
+
+- **No install (Chrome/Edge):** https://espressif.github.io/esptool-js/ → **Connect** → pick
+  the car's port → offset from the table → choose the file → **Program**.
+- **esptool:** `esptool --chip esp32c3 -p <PORT> write_flash 0x10000 emocar-firmware_<ver>_esp32c3_app.bin`
+  (`<PORT>`: `COM5`-style on Windows, `/dev/ttyACM0` on Linux).
+
+Every release has a `SHA256SUMS` file to check the downloads against.
+
 ## Build / flash
 
 Arduino IDE: board **ESP32C3 Dev Module**, **USB CDC On Boot: Enabled**, port `/dev/ttyACM0`,
@@ -92,17 +128,7 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc -p /dev/ttyACM0 emo
 arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
 ```
 
-**From a release** (no Arduino needed): the GitHub release carries two firmware files.
-`emocar-firmware_<ver>_esp32c3_app.bin` goes at `0x10000` and updates a car while keeping
-its uploaded GIFs and /configs values; `…_full.bin` goes at `0x0` on a blank board and
-wipes them (it covers the whole 4 MB, LittleFS included).
-
-```bash
-esptool --chip esp32c3 -p /dev/ttyACM0 write_flash 0x10000 emocar-firmware_<ver>_esp32c3_app.bin
-```
-
-Or in Chrome/Edge with nothing installed: https://espressif.github.io/esptool-js/ →
-Connect → add the file at the offset above → Program.
+No Arduino at hand? Flash a release `.bin` instead — see [Run a release build](#run-a-release-build).
 
 The upload server owns the same port while it runs — stop it (`make -C server down`)
 before flashing or opening a monitor.

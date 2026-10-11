@@ -31,18 +31,7 @@ and a driver backend to `../display.cpp`.
 
 ### From a release download
 
-Put the binary in a folder of its own (the GIF library is created next to it), plug the
-car in, start it — the browser opens http://localhost:8080 by itself.
-
-| OS | File | Start it |
-|---|---|---|
-| Windows x64 | `emocar-server_<ver>_windows_amd64.exe` | double-click; SmartScreen: **More info → Run anyway**. Closing the console window stops it |
-| Linux x64 | `emocar-server_<ver>_linux_amd64` | `chmod +x emocar-server_*` then `./emocar-server_<ver>_linux_amd64`; Ctrl+C stops it |
-| Linux ARM64 | `emocar-server_<ver>_linux_arm64` | same as Linux x64 |
-| macOS | — | not built yet; `cd server && go build` on the Mac |
-
-Linux needs serial access once: `sudo usermod -aG dialout $USER`, then log out and in.
-On a box with no browser (or to skip it) pass `-open=false`.
+See [Run a release build](../README.md#run-a-release-build) in the main README.
 
 ### From the repo
 
