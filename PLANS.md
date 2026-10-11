@@ -367,7 +367,7 @@ cannot answer "is this data new?".
       disturbance delays calibration instead of restarting it. Host tests cover still,
       tap, two taps, 35 Hz rumble (accepted, bias within 0.1 dps) and palm / late
       set-down (refused). Not yet tried on the board.
-- [ ] Tier 1: /config endpoint + NVS + live telemetry chart in server UI → **P6**
+- [x] Tier 1: live config + telemetry in the server UI → **P6** (`/configs`, 2026-10-11)
 - [ ] `REST_JITTER_DPS` 1.5 is a guess — measured rest jitter is ~0.5, so there is margin,
       but confirm it sits below the quietest real handling (P5)
 - [ ] Tier 2 (later, with audience): guided calibration wizard
@@ -612,14 +612,32 @@ are configurable. Revisit only if states are ever meant to be *user-authored*.
 Order: the struct + routes are useful before any UI exists (curl beats
 recompiling); the card view is what makes it pleasant.
 
-- [ ] `MotionCfg` = per-state blocks + globals; `config.h` macros → `*_DEF`
-- [ ] motion.cpp reads `cfg.*`; `enabled` flag skips a state in the want-chain
-- [ ] NVS blob load/save with `CFG_VERSION` guard, defaults on mismatch
-- [ ] `CONFIG` read / per-state write / globals write / reset commands + validation
-- [ ] `TELEM` command + `gxyPeak` in Motion
-- [ ] `/api/car/config` proxy in server/main.go
-- [ ] Per-state card in the web UI: fields, enable box, chart with threshold lines
-- [ ] Keep pins, profile and slots compile-time — lockout risk
+**Built 2026-10-11 (ef5c02b), tested on the car** — as `/configs` in the server, with
+these departures from the plan above:
+- One flat `MotionCfg` (cfg.h) named by the config.h macros themselves, which stay the
+  defaults (no `*_DEF` rename) — so page, server, `CFG` protocol and Export share names.
+- Saved in LittleFS `/cfg.bin` (already mounted for the GIFs; no `Preferences`), stamped
+  with a hash of the compiled defaults instead of a hand-bumped `CFG_VERSION`: a sketch
+  with different defaults drops the saved values, so config.h always wins.
+- One `CFG SET NAME=v …` command applies any subset atomically (no per-state/global
+  split); `CFG` reads, `CFG RESET` restores. Lines over `CMD_LINE_MAX` (now 640) are refused.
+- **Export** (not in the plan): the server rewrites the `#define` lines in `../config.h`
+  from the car's values, comments kept — tune live, export, flash.
+- `STATE_*` became runtime switches; enabling one on a car that booted NORMAL-only reboots
+  it once to calibrate the gyro.
+- Live readouts per card come from the existing `TELEM` stream (built for /dashboard),
+  as numbers and two meters rather than a chart with threshold lines.
+
+- [x] `MotionCfg` + motion.cpp reads `cfg.*`; a state switched off is skipped
+- [x] Saved on flash, defaults on mismatch
+- [x] `CFG` read / set / reset commands + validation (ranges, exit < enter, re-arm < swing
+      line, `DIZZY_AFTER_MS` ≥ `EXIT_HOLD_MS`)
+- [x] `TELEM` command (done with /dashboard) — `gxyPeak` not added
+- [x] `/api/car/config` + `/api/car/config/export` in server/config.go
+- [x] Per-state cards in `/configs`: fields, enable boxes, ⓘ help, live lines
+- [x] Pins, profile, slots, `RMS_WINDOW_MS` stay compile-time
+- [ ] Look at the page in a browser on a real tuning session; threshold lines on a chart
+      only if the numbers turn out not to be enough
 
 ### P7 — A dead sensor looks exactly like a perfectly still car
 
