@@ -93,9 +93,11 @@
   .key i { font-style: normal; }
   .row .unit { color: var(--dim); font-size: 12px; }
 
-  .states { display: flex; gap: 10px; flex-wrap: wrap; }
+  .states { display: flex; gap: 8px; flex-wrap: wrap; }
   .states label { display: flex; align-items: center; gap: 6px; background: var(--bg);
-                  border: 1px solid var(--edge); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+                  border: 1px solid var(--edge); border-radius: 8px; padding: 5px 10px; cursor: pointer;
+                  white-space: nowrap; }
+  .states input { margin: 0; }
   .states label.always { cursor: default; color: var(--dim); }
   .states label.changed { border-color: var(--warn); }
   .ladder { color: var(--dim); font-size: 12px; margin-top: 8px; }
@@ -132,7 +134,7 @@
         <h2>States
           <span class="foot"><span class="err"></span><button class="reset">Reset to sketch</button><button class="primary apply">Apply</button></span></h2>
         <div class="states">
-          <label class="always"><input type="checkbox" checked disabled> NORMAL <small>always</small> <span class="info" tabindex="0" data-tip="NORMAL">i</span></label>
+          <label class="always"><input type="checkbox" checked disabled> NORMAL <span class="info" tabindex="0" data-tip="NORMAL">i</span></label>
           <label><input type="checkbox" data-key="STATE_FAST"> FAST <span class="info" tabindex="0" data-tip="STATE_FAST">i</span></label>
           <label><input type="checkbox" data-key="STATE_DIZZY"> DIZZY <span class="info" tabindex="0" data-tip="STATE_DIZZY">i</span></label>
           <label><input type="checkbox" data-key="STATE_HAPPY"> HAPPY <span class="info" tabindex="0" data-tip="STATE_HAPPY">i</span></label>
