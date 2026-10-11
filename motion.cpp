@@ -5,12 +5,14 @@
 //        : fast        -> FAST
 //        :                NORMAL
 //
-// Each condition owns its hysteresis. An unregistered state (STATE_* in config.h) falls
-// through; in a hand that is HAPPY if registered, else NORMAL — never FAST.
+// Each condition owns its hysteresis. A state switched off (cfg.state*, STATE_* in
+// config.h) falls through; in a hand that is HAPPY if on, else NORMAL — never FAST.
+// Every number comes from cfg (cfg.h), which the server's /configs page can change live.
 #include <Arduino.h>
 #include <math.h>
 #include "config.h"
 #include "motion.h"
+#include "cfg.h"
 
 static const char *NAMES[] = { "NORMAL", "FAST", "DIZZY", "HAPPY" };
 const char *carStateName(CarState s) { return NAMES[s]; }
@@ -37,8 +39,7 @@ static uint32_t dizzyUntil;               // DIZZY wanted until then (shake or s
 static uint32_t rollSince, stillSince, quietSince, rollHoldSince;
 
 // Shake, per axis: which side it is past (0 = re-armed), and when its last SWING_RING
-// swings were.
-#define SWING_RING 16
+// swings were (SWING_RING in cfg.h).
 static int8_t   swingSide[3];
 static uint32_t swingAt[3][SWING_RING];
 static int      swingIdx[3];
@@ -48,8 +49,8 @@ static int8_t   spinDir;
 static uint32_t spinStart, spinLast;
 
 // DIZZY_AFTER_MS includes the step-down, so the wanted window is the rest of it.
-static_assert(DIZZY_AFTER_MS >= EXIT_HOLD_MS, "DIZZY_AFTER_MS includes EXIT_HOLD_MS");
-static const uint32_t DIZZY_WANT_MS = DIZZY_AFTER_MS - EXIT_HOLD_MS;
+// cfgSet() keeps DIZZY_AFTER_MS >= EXIT_HOLD_MS.
+static uint32_t dizzyWantMs() { return cfg.dizzyAfterMs - cfg.exitHoldMs; }
 
 static GyroRaw  h1, h2;                   // the two raw samples before this one
 static int      histN;
@@ -127,29 +128,29 @@ const Motion &motionGet() { return m; }
 // Enter only after FAST_HOLD_MS of continuous loudness (a tap never lasts); leave on
 // level alone — EXIT_HOLD_MS decides how long the face stays.
 static void updateFast(uint32_t now) {
-  if (fastCond) { if (m.rms <= FAST_EXIT_RMS) fastCond = false; return; }
-  if (m.rms <= FAST_ENTER_RMS) { fastSince = now; return; }
-  if (now - fastSince >= FAST_HOLD_MS) fastCond = true;
+  if (fastCond) { if (m.rms <= cfg.fastExitRms) fastCond = false; return; }
+  if (m.rms <= cfg.fastEnterRms) { fastSince = now; return; }
+  if (now - fastSince >= cfg.fastHoldMs) fastCond = true;
 }
 
 // A swing = an axis crossing ±SHAKE_DPS; that side re-arms below SHAKE_REARM_DPS. Each axis
 // counts on its own: enough swings on any one inside the window, and every further swing
 // on it keeps DIZZY going.
 static void updateShakeAxis(int a, float g, uint32_t now) {
-  int8_t side = g > SHAKE_DPS ? 1 : g < -SHAKE_DPS ? -1 : 0;
+  int8_t side = g > cfg.shakeDps ? 1 : g < -cfg.shakeDps ? -1 : 0;
   bool swung = side && side != swingSide[a];
   if (swung) {
     swingAt[a][swingIdx[a]] = now;
     swingIdx[a] = (swingIdx[a] + 1) % SWING_RING;
   }
   if (side) swingSide[a] = side;
-  else if (fabsf(g) < SHAKE_REARM_DPS) swingSide[a] = 0;
+  else if (fabsf(g) < cfg.shakeRearmDps) swingSide[a] = 0;
 
   int n = 0;
   for (int i = 0; i < SWING_RING; i++)
-    if (swingAt[a][i] && now - swingAt[a][i] < SHAKE_WINDOW_MS) n++;
+    if (swingAt[a][i] && now - swingAt[a][i] < cfg.shakeWindowMs) n++;
   m.swings[a] = n;
-  if (swung && n >= SHAKE_SWINGS) dizzyUntil = now + DIZZY_WANT_MS;
+  if (swung && n >= (int)cfg.shakeSwings) dizzyUntil = now + dizzyWantMs();
 }
 
 static void updateShake(uint32_t now) {
@@ -161,48 +162,48 @@ static void updateShake(uint32_t now) {
 // |gz| held above SPIN_GZ_DPS one way; a reversal starts over, a dip longer than SPIN_DIP_MS
 // ends it.
 static void updateSpin(uint32_t now) {
-  int8_t dir = m.gz > SPIN_GZ_DPS ? 1 : m.gz < -SPIN_GZ_DPS ? -1 : 0;
+  int8_t dir = m.gz > cfg.spinGzDps ? 1 : m.gz < -cfg.spinGzDps ? -1 : 0;
   if (dir && dir == spinDir) spinLast = now;
   else if (dir) { spinDir = dir; spinStart = spinLast = now; }
-  else if (spinDir && now - spinLast > SPIN_DIP_MS) spinDir = 0;
+  else if (spinDir && now - spinLast > cfg.spinDipMs) spinDir = 0;
 
   m.spinMs = spinDir ? spinLast - spinStart : 0;
-  if (dir && m.spinMs >= SPIN_HOLD_MS) dizzyUntil = now + DIZZY_WANT_MS;
+  if (dir && m.spinMs >= cfg.spinHoldMs) dizzyUntil = now + dizzyWantMs();
 }
 
 // Floor -> hand on unsigned roll travel, hand -> floor on stillness. The accumulator
 // survives zero-crossings; only HAND_QUIET_MS of continuous quiet clears it.
 static void updateContext(uint32_t now) {
   if (m.handCtx) {
-    if (m.rms > STILL_RMS) stillSince = now;
-    else if (now - stillSince >= HAND_SETTLE_MS) { m.handCtx = false; m.rollAcc = 0; }
+    if (m.rms > cfg.stillRms) stillSince = now;
+    else if (now - stillSince >= cfg.handSettleMs) { m.handCtx = false; m.rollAcc = 0; }
     return;
   }
-  if (fabsf(m.gy) >= HAND_QUIET_DPS) {
+  if (fabsf(m.gy) >= cfg.handQuietDps) {
     quietSince = now;
-    if (now - rollSince > HAND_TILT_MS) { m.rollAcc = 0; rollSince = now; }
-    if (now - rollHoldSince >= HAND_ROLL_MS) m.rollAcc += fabsf(m.gy) * SAMPLE_S;
-    if (m.rollAcc >= HAND_TILT_DEG) { m.handCtx = true; stillSince = now; }
+    if (now - rollSince > cfg.handTiltMs) { m.rollAcc = 0; rollSince = now; }
+    if (now - rollHoldSince >= cfg.handRollMs) m.rollAcc += fabsf(m.gy) * SAMPLE_S;
+    if (m.rollAcc >= cfg.handTiltDeg) { m.handCtx = true; stillSince = now; }
   } else {
     rollHoldSince = now;
-    if (now - quietSince >= HAND_QUIET_MS) { m.rollAcc = 0; rollSince = now; }
+    if (now - quietSince >= cfg.handQuietMs) { m.rollAcc = 0; rollSince = now; }
   }
 }
 
 static bool updateState(uint32_t now) {
-  // Plain ifs, not #if, so disabled states keep compiling.
   updateShake(now); updateSpin(now);               // always: the dashboard shows them
-  if (USE_GYRO) updateContext(now);
-  if (STATE_FAST) updateFast(now);
+  updateContext(now);
+  if (cfg.stateFast) updateFast(now);
+  else fastCond = false;                           // switched back on, it starts fresh
 
-  CarState want = STATE_DIZZY && (int32_t)(now - dizzyUntil) < 0 ? DIZZY
-                : m.handCtx                        ? (STATE_HAPPY ? HAPPY : NORMAL)
-                : STATE_FAST && fastCond           ? FAST
-                :                                    NORMAL;
+  CarState want = cfg.stateDizzy && (int32_t)(now - dizzyUntil) < 0 ? DIZZY
+                : m.handCtx                       ? (cfg.stateHappy ? HAPPY : NORMAL)
+                : cfg.stateFast && fastCond       ? FAST
+                :                                   NORMAL;
 
   if (want != candidate) { candidate = want; candidateSince = now; }
   if (candidate == m.state) return false;
-  uint32_t hold = PRIORITY[candidate] > PRIORITY[m.state] ? ENTER_HOLD_MS : EXIT_HOLD_MS;
+  uint32_t hold = PRIORITY[candidate] > PRIORITY[m.state] ? cfg.enterHoldMs : cfg.exitHoldMs;
   if (now - candidateSince >= hold) { m.state = candidate; return true; }
   return false;
 }

@@ -40,7 +40,8 @@ make run                        # build + UI on http://localhost:8080
 Plug the car in over USB. The server finds it by its Espressif USB id (VID `303A`) —
 `-port /dev/ttyACM0` (or `COM5`, `/dev/cu.usbmodem…`) overrides that when more than one
 ESP32 is attached. Other flags: `-listen`, `-lib` (comma-separated library dirs),
-`-uploads` (where browser-added GIFs are saved).
+`-uploads` (where browser-added GIFs are saved), `-sketch` (the firmware folder whose
+`config.h` the `/configs` Export rewrites; default `..`, the repo when run from `server/`).
 
 **GIF folder.** By default both the library and uploads are a `gifs` folder next to the
 binary, created on first start — e.g. `C:\emocar\emocar-server.exe` uses `C:\emocar\gifs\`,
@@ -84,6 +85,14 @@ sequence, so touching them would reboot the car every time the server connected.
   `TELEM` below), and needs at least one `STATE_*` besides NORMAL in config.h, otherwise
   the gyro isn't running.
 
+- **State conditions** (`/configs`, dev tool) shows every setting behind the states, one
+  card per state, with what it is reading right now. **Apply** sends one card to the car,
+  which uses it at once and saves it on flash (`CFG` below); an orange box is not applied
+  yet, a blue number differs from the sketch's default, ⓘ explains each setting. **Export
+  to config.h** writes the car's values into the `#define` lines of `../config.h`
+  (`-sketch`), comments untouched — flash that sketch and they become the defaults. A car
+  flashed with different defaults drops its saved values, so config.h always wins.
+
 The car stores only the four active animations (LittleFS `/anim0..3.qgif`); the library
 never leaves the PC. Uploads survive power cycles and firmware reflashes.
 
@@ -100,6 +109,9 @@ never buffered in RAM.
 | `TELEM <s>` | no reply; the car streams telemetry for `<s>` seconds (max 60), `0` stops |
 | `GET <n>` | `OK <len>` + `<len>` raw bytes (`ERR placeholder in use` when the slot has no file) |
 | `PUT <n> <len>` | `READY <chunk>`, then the payload one chunk at a time, each answered `ACK <got>` once it is on flash, and `OK <bytes>` at the end |
+| `CFG` | `OK {"cur":{NAME:value…},"def":{…}}` — the state conditions, named as in config.h |
+| `CFG SET NAME=v …` | the same, after validating, applying and saving all of them; `ERR <why>` and nothing changed if one is rejected |
+| `CFG RESET` | the same, back to the sketch's defaults |
 
 Replies are one line starting `OK` / `ERR` / `READY` / `ACK`. The port can also carry
 telemetry and, in development builds (`DEBUG_LOG 1`), debug lines, so a client reads past
@@ -134,10 +146,12 @@ Validation before the rename means a dropped transfer can't corrupt the active s
 main.go        flags, library scan, HTTP API for the UI, proxy to the car
 serial.go      the car link: port auto-detect, reconnect, STATUS / GET / PUT
 telemetry.go   the dashboard's live feed: background reader, SSE fan-out, ZERO
+config.go      /configs API: CFG proxy, Export into config.h
 profiles.go    display profile registry (embeds profiles.json)
 qgif.go        GIF -> .qgif conversion per profile (composite, box resize, pack) + preview render
 web/index.html the animations UI, embedded into the binary
 web/dashboard.html  the sensor dashboard (/dashboard), embedded too
+web/configs.html    the state conditions page (/configs), embedded too
 ```
 
 ## .qgif container (v2)

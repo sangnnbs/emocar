@@ -6,6 +6,7 @@
 #include "cmd.h"
 #include "anim.h"
 #include "motion.h"
+#include "cfg.h"
 #include "telem.h"
 
 static void replyErr(const char *msg) { Serial.printf("ERR %s\n", msg); }
@@ -114,7 +115,22 @@ static void handlePutAnim(int slot, long payloadLen) {
   Serial.printf("OK %ld\n", payloadLen);
 }
 
+static void handleCfg(char *args) {
+  char err[96];
+  if (!strcmp(args, "RESET")) cfgReset();
+  else if (!strncmp(args, "SET ", 4)) {
+    if (!cfgSet(args + 4, err, sizeof err)) { replyErr(err); return; }
+  } else if (*args) { replyErr("CFG takes nothing, SET or RESET"); return; }
+  Serial.print("OK ");
+  cfgPrintJson();
+  Serial.print('\n');
+}
+
 static void handleLine(char *line) {
+  if (!strncmp(line, "CFG", 3) && (line[3] == 0 || line[3] == ' ')) {
+    handleCfg(line + (line[3] ? 4 : 3));
+    return;
+  }
   char verb[8] = "";
   int slot = -1;
   long len = 0;
@@ -142,16 +158,20 @@ static void handleLine(char *line) {
 void cmdPoll() {
   static char line[CMD_LINE_MAX];
   static size_t len = 0;
+  static bool tooLong = false;
 
   while (Serial.available()) {
     int c = Serial.read();
     if (c != '\n' && c != '\r') {
       if (len + 1 < sizeof line) line[len++] = (char)c;
+      else tooLong = true;
       continue;
     }
     if (len == 0) continue;            // blank line, or the second half of a CRLF
     line[len] = 0;
     len = 0;
+    // A cut-off "CFG SET SHAKE_DPS=35|0" would apply the wrong number: refuse it.
+    if (tooLong) { tooLong = false; replyErr("line too long"); return; }
     handleLine(line);
     return;                            // one command per loop
   }

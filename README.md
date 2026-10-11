@@ -18,11 +18,17 @@ tells it apart. The ladder itself is fast going up (`ENTER_HOLD_MS`) and slow co
 (`EXIT_HOLD_MS`), so a reaction is instant and a feeling wears off.
 
 **Registered states.** Each state but NORMAL has a flag in config.h (`STATE_FAST`,
-`STATE_DIZZY`, `STATE_HAPPY`; DIZZY + HAPPY on as of 2026-10-10). An unregistered state never shows and its
-detector does not run; set the flag to `1` to bring it back. With HAPPY off, a car held in
-a hand shows NORMAL, never FAST. The host tests register all four.
-With only NORMAL registered the gyro is not started at all (`USE_GYRO`, derived): the car
-boots straight to 🙂 with or without a working gyro.
+`STATE_DIZZY`, `STATE_HAPPY`; DIZZY + HAPPY on as of 2026-10-10). A state switched off never
+shows. With HAPPY off, a car held in a hand shows NORMAL, never FAST. The host tests
+register all four. With only NORMAL on the gyro is not started at all: the car boots
+straight to 🙂 with or without a working gyro (switching a state on from /configs then
+reboots it once, to calibrate).
+
+**Live tuning.** The state flags and every threshold below them in config.h are only
+defaults: the server's `/configs` page changes them on the running car (`cfg.*`, saved in
+`/cfg.bin` on flash, `CFG` commands in cmd.h) and **Export** writes the car's values back
+into config.h. The saved file is stamped with a hash of the defaults it was made under, so
+flashing a sketch with different defaults drops it — after Export + flash, nothing is lost.
 
 Raw samples pass a median-of-3 despike first (`DESPIKE_MEDIAN3`) — see
 [Design notes](#design-notes) for why each of these mechanisms exists.

@@ -26,6 +26,9 @@ var indexHTML []byte
 //go:embed web/dashboard.html
 var dashboardHTML []byte
 
+//go:embed web/configs.html
+var configsHTML []byte
+
 var (
 	car        *carLink
 	libDirs    []string
@@ -394,6 +397,7 @@ func main() {
 	port := flag.String("port", "", "car serial port (default: auto-detect an Espressif USB device)")
 	lib := flag.String("lib", gifs, "comma-separated GIF library dirs")
 	uploads := flag.String("uploads", gifs, "where browser uploads are stored")
+	flag.StringVar(&sketchDir, "sketch", "..", "firmware folder whose config.h /configs Export rewrites")
 	flag.Parse()
 	car = newCarLink(*port)
 	libDirs = strings.Split(*lib, ",")
@@ -418,6 +422,12 @@ func main() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(dashboardHTML)
 	})
+	http.HandleFunc("/configs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(configsHTML)
+	})
+	http.HandleFunc("/api/car/config", handleConfig)
+	http.HandleFunc("/api/car/config/export", handleConfigExport)
 	http.HandleFunc("/api/telemetry", handleTelemetry)
 	http.HandleFunc("/api/car/zero", handleZero)
 	http.HandleFunc("/api/library", handleLibrary)

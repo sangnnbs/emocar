@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emocar configs</title>
+<style>
+  :root {
+    --bg: #101216; --panel: #191c22; --edge: #2a2e37; --text: #d6dae2;
+    --dim: #8a909c; --accent: #4da3ff; --ok: #46c46e; --bad: #e05555; --warn: #e0a53c;
+    --rms: #f0b84a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, sans-serif; }
+  main { max-width: 1208px; margin: 0 auto; padding: 16px 20px 60px; }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 8px 0 2px; }
+  h1 span { color: var(--dim); font-weight: 400; }
+  header nav { margin-left: auto; display: flex; gap: 14px; }
+  header a { color: var(--accent); text-decoration: none; }
+  #cartext { color: var(--dim); }
+  h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase;
+       letter-spacing: .06em; display: flex; align-items: center; gap: 8px; }
+  h2 em { font-style: normal; text-transform: none; letter-spacing: 0; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+         background: var(--bad); margin-right: 6px; }
+  .dot.on { background: var(--ok); }
+
+  .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+         margin: 14px 0; padding: 10px 14px; background: var(--panel);
+         border: 1px solid var(--edge); border-radius: 10px; }
+  .bar .push { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .pill { padding: 2px 10px; border-radius: 99px; border: 1px solid var(--edge);
+          font-weight: 600; font-size: 13px; }
+  #saved { color: var(--ok); }
+  #msg { font-size: 13px; color: var(--dim); }
+  #msg.bad { color: var(--bad); }
+  #msg.good { color: var(--ok); }
+
+  .line { display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;
+          gap: 14px; margin-bottom: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+          padding: 14px; min-width: 0; flex: 0 1 380px; display: flex; flex-direction: column; }
+  .card .foot { margin-top: auto; padding-top: 10px; }
+  h3 { font-size: 12px; margin: 12px 0 6px; color: var(--dim); font-weight: 600; }
+  h3:first-of-type { margin-top: 0; }
+  /* top row: two short strips that share the full width */
+  .line.top .card { flex: 1 1 0; min-width: 320px; }
+  .compact h2 { margin-bottom: 8px; }
+  .compact h2 .foot { margin: 0 0 0 auto; padding: 0; text-transform: none; letter-spacing: 0; }
+  .compact h2 button { font-size: 12px; padding: 3px 10px; }
+  .fields.inline { display: flex; flex-wrap: wrap; gap: 4px 28px; }
+  .fields.inline .row { grid-template-columns: auto 76px auto 16px; padding: 0; }
+  .card.off { opacity: .55; }
+  .card.off:hover { opacity: .85; }
+
+  .live { font: 12px/1.6 ui-monospace, monospace; color: var(--dim); background: var(--bg);
+          border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
+  .live b { color: var(--text); font-weight: 600; }
+  .meter { position: relative; height: 10px; background: #0b0d10; border-radius: 5px;
+           margin-top: 5px; overflow: hidden; }
+  .meter .fill { position: absolute; top: 0; bottom: 0; left: 0; background: var(--rms);
+                 border-radius: 5px; transition: width .15s; }
+  .meter .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--dim); }
+  .meter .mark.enter { background: var(--bad); }
+
+  .info { display: inline-flex; align-items: center; justify-content: center; flex: none;
+          width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--dim);
+          color: var(--dim); font: italic 600 11px/1 Georgia, serif; cursor: help; user-select: none; }
+  .info:hover, .info:focus { border-color: var(--accent); color: var(--accent); outline: none; }
+  #tip { position: fixed; z-index: 10; max-width: 300px; padding: 9px 12px; border-radius: 8px;
+         background: #252a33; border: 1px solid #3a404c; box-shadow: 0 6px 20px #0008;
+         font-size: 12.5px; line-height: 1.5; color: var(--text); pointer-events: none;
+         opacity: 0; transition: opacity .12s; }
+  #tip.show { opacity: 1; }
+  #tip b { display: block; margin-bottom: 3px; }
+  #tip small { display: block; margin-top: 5px; color: var(--dim); }
+
+  .row { display: grid; grid-template-columns: 1fr 76px 30px 16px; align-items: center;
+         gap: 8px; padding: 3px 0; }
+  .row label { color: var(--text); }
+  .row input { width: 100%; background: #0b0d10; color: var(--text); border: 1px solid var(--edge);
+               border-radius: 6px; padding: 4px 8px; font: 13px ui-monospace, monospace;
+               text-align: right; }
+  .row input:disabled { opacity: .5; }
+  .row input.changed { border-color: var(--warn); }
+  .row input.custom { color: var(--accent); }
+  .row input.bad { border-color: var(--bad); color: var(--bad); }
+  .err { color: var(--bad); font-size: 12px; margin-right: auto; align-self: center;
+         text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .key { font-size: 12px; color: var(--dim); }
+  .key i { font-style: normal; }
+  .row .unit { color: var(--dim); font-size: 12px; }
+
+  .states { display: flex; gap: 10px; flex-wrap: wrap; }
+  .states label { display: flex; align-items: center; gap: 6px; background: var(--bg);
+                  border: 1px solid var(--edge); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .states label.always { cursor: default; color: var(--dim); }
+  .states label.changed { border-color: var(--warn); }
+  .ladder { color: var(--dim); font-size: 12px; margin-top: 8px; }
+
+  .foot { display: flex; justify-content: flex-end; gap: 8px; }
+  button { background: #22262e; color: var(--text); border: 1px solid var(--edge);
+           border-radius: 6px; padding: 5px 12px; font: inherit; cursor: pointer; }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>emocar <span>· state conditions</span></h1>
+    <div><span class="dot" id="dot"></span><span id="cartext">connecting…</span></div>
+    <nav><a href="/">Animations</a><a href="/dashboard">Dashboard</a></nav>
+  </header>
+
+  <div class="bar">
+    <span>state <span class="pill" id="state">–</span></span>
+    <span id="saved"></span>
+    <span id="differ"></span>
+    <span class="key"><i style="color:var(--warn)">▢</i> orange = not applied · <i style="color:var(--accent)">123</i> blue = differs from sketch</span>
+    <div class="push">
+      <span id="msg"></span>
+      <button id="export">Export to config.h</button>
+      <button id="resetAll" title="Every setting back to the sketch's defaults, on the car">Reset all</button>
+    </div>
+  </div>
+
+  <div class="line top">
+      <div class="card compact" data-card="states">
+        <h2>States
+          <span class="foot"><span class="err"></span><button class="reset">Reset to sketch</button><button class="primary apply">Apply</button></span></h2>
+        <div class="states">
+          <label class="always"><input type="checkbox" checked disabled> NORMAL <small>always</small> <span class="info" tabindex="0" data-tip="NORMAL">i</span></label>
+          <label><input type="checkbox" data-key="STATE_FAST"> FAST <span class="info" tabindex="0" data-tip="STATE_FAST">i</span></label>
+          <label><input type="checkbox" data-key="STATE_DIZZY"> DIZZY <span class="info" tabindex="0" data-tip="STATE_DIZZY">i</span></label>
+          <label><input type="checkbox" data-key="STATE_HAPPY"> HAPPY <span class="info" tabindex="0" data-tip="STATE_HAPPY">i</span></label>
+        </div>
+        <div class="ladder">priority  DIZZY &gt; HAPPY &gt; FAST &gt; NORMAL · an unchecked state is skipped</div>
+      </div>
+
+      <div class="card compact" data-card="timing">
+        <h2>Timing <em>· all states</em>
+          <span class="foot"><span class="err"></span><button class="reset">Reset to sketch</button><button class="primary apply">Apply</button></span></h2>
+        <div class="fields inline" data-fields="timing"></div>
+      </div>
+  </div>
+
+  <div class="line">
+      <div class="card" data-card="dizzy" data-state="STATE_DIZZY">
+        <h2>DIZZY <em class="offnote">· off (still editable)</em></h2>
+        <h3>Shake</h3>
+        <div class="live">swings  gx <b id="sx">–</b>  gy <b id="sy">–</b>  gz <b id="sz">–</b>
+          · need <b id="sneed">–</b> in <b id="swin">–</b> ms</div>
+        <div class="fields" data-fields="shake"></div>
+        <h3>Spin</h3>
+        <div class="live">gz <b id="lgz">–</b> dps · spin <b id="lspin">0</b> / <b id="lspinneed">–</b> ms
+          <div class="meter"><div class="fill" id="mspin" style="background:var(--accent)"></div></div>
+        </div>
+        <div class="fields" data-fields="spin"></div>
+        <div class="foot"><span class="err"></span><button class="reset">Reset to sketch</button><button class="primary apply">Apply</button></div>
+      </div>
+
+      <div class="card" data-card="fast" data-state="STATE_FAST">
+        <h2>FAST <em class="offnote">· off (still editable)</em></h2>
+        <div class="live">rms <b id="lrms">–</b> dps
+          <div class="meter"><div class="fill" id="mrms"></div>
+            <div class="mark" id="mexit"></div><div class="mark enter" id="menter"></div></div>
+        </div>
+        <div class="fields" data-fields="fast"></div>
+        <div class="foot"><span class="err"></span><button class="reset">Reset to sketch</button><button class="primary apply">Apply</button></div>
+      </div>
+
+      <div class="card" data-card="hand" data-state="STATE_HAPPY">
+        <h2>HAPPY <em class="offnote">· off (still editable)</em></h2>
+        <div class="live">ctx <b id="lctx">–</b> · roll <b id="lroll">–</b>° / <b id="ltilt">–</b>° · rms <b id="lrms2">–</b></div>
+        <div class="fields" data-fields="hand"></div>
+        <div class="foot"><span class="err"></span><button class="reset">Reset to sketch</button><button class="primary apply">Apply</button></div>
+      </div>
+  </div>
+</main>
+
+<script>
+// Rows per card: [config.h name, label, unit]. Values and defaults come from the car.
+const FIELDS = {
+  timing: [
+    ['ENTER_HOLD_MS', 'Enter hold', 'ms'],
+    ['EXIT_HOLD_MS', 'Exit hold', 'ms'],
+  ],
+  fast: [
+    ['FAST_ENTER_RMS', 'Enter RMS', 'dps'],
+    ['FAST_EXIT_RMS', 'Exit RMS', 'dps'],
+    ['FAST_HOLD_MS', 'Hold', 'ms'],
+  ],
+  shake: [
+    ['SHAKE_DPS', 'Swing line', 'dps'],
+    ['SHAKE_REARM_DPS', 'Re-arm below', 'dps'],
+    ['SHAKE_SWINGS', 'Swings', ''],
+    ['SHAKE_WINDOW_MS', 'Window', 'ms'],
+  ],
+  spin: [
+    ['SPIN_GZ_DPS', 'Spin rate', 'dps'],
+    ['SPIN_HOLD_MS', 'Hold', 'ms'],
+    ['SPIN_DIP_MS', 'Allowed dip', 'ms'],
+    ['DIZZY_AFTER_MS', 'Show after', 'ms'],
+  ],
+  hand: [
+    ['HAND_TILT_DEG', 'Tilt', '°'],
+    ['HAND_TILT_MS', 'Tilt window', 'ms'],
+    ['HAND_ROLL_MS', 'Roll gate', 'ms'],
+    ['HAND_QUIET_DPS', 'Quiet below', 'dps'],
+    ['HAND_QUIET_MS', 'Quiet clears', 'ms'],
+    ['STILL_RMS', 'Still RMS', 'dps'],
+    ['HAND_SETTLE_MS', 'Settle', 'ms'],
+  ],
+};
+
+// Hover text per setting: what it is, which way to turn it, and a measured number when
+// there is one.
+const TIPS = {
+  NORMAL: ['NORMAL', 'The default face, shown whenever no other state applies. Always on.'],
+  STATE_FAST: ['FAST', 'The car is driving on a surface: steady vibration from the wheels. Floor only — never shown while the car is in a hand.'],
+  STATE_DIZZY: ['DIZZY', 'Shaken hard, or spun in circles. Highest priority: it beats HAPPY, so shaking a held car shows DIZZY.'],
+  STATE_HAPPY: ['HAPPY', 'Picked up and held in a hand. Unticked: a held car shows NORMAL (never FAST).'],
+
+  ENTER_HOLD_MS: ['Enter hold', 'How long a higher state must be wanted before the face switches up to it (e.g. NORMAL → HAPPY). Lower = snappier; higher = ignores short blips.'],
+  EXIT_HOLD_MS: ['Exit hold', 'How long a face stays after its condition ends, before stepping down (e.g. HAPPY → NORMAL). Higher = faces linger longer.'],
+
+  FAST_ENTER_RMS: ['Enter RMS', 'Vibration level the car must pass to count as driving — the RMS of the turn rate on all 3 axes over the last 250 ms, in °/s. On a desk at rest ≈ 0.5. On soft floors (carpet, bed) lower it toward 3.0.'],
+  FAST_EXIT_RMS: ['Exit RMS', 'Vibration below this ends FAST. Must be lower than Enter RMS: the gap between them stops the face flickering when vibration hovers around one value.'],
+  FAST_HOLD_MS: ['Hold', 'Vibration must stay above Enter RMS this long before FAST starts. A tap spikes vibration but never lasts, so this filters taps out.'],
+
+  SHAKE_DPS: ['Swing line', 'A “swing” = the car turning faster than ± this on one axis. A hard shake goes far past 400 °/s; picking the car up rarely does. Lower = DIZZY triggers more easily.'],
+  SHAKE_REARM_DPS: ['Re-arm below', 'After a swing, that axis must slow below this before the same direction can count again — so one long swing isn\'t counted many times. Must be lower than Swing line.'],
+  SHAKE_SWINGS: ['Swings', 'How many swings within Window trigger DIZZY (at most 16). Each axis (gx, gy, gz) is counted separately, never added together. Measured: hard shake gx 10, gy 11, gz 5 in 2 s; a pickup 0–1.'],
+  SHAKE_WINDOW_MS: ['Window', 'Swings older than this stop counting. Longer = a slower shake still triggers DIZZY.'],
+
+  SPIN_GZ_DPS: ['Spin rate', 'Turn rate on the flat (gz, yaw) the car must hold in one direction — the car driving in circles. Reversing direction starts over. Not yet measured on the car.'],
+  SPIN_HOLD_MS: ['Hold', 'How long the spin must last before DIZZY. 5000 = five seconds of circling.'],
+  SPIN_DIP_MS: ['Allowed dip', 'Short drops below Spin rate (a bump, wheel slip) don\'t break the spin if they are shorter than this. Longer drops end it.'],
+  DIZZY_AFTER_MS: ['Show after', 'How long DIZZY keeps showing after the last swing or the end of the spin. Includes Exit hold, so it can\'t be shorter than Exit hold.'],
+
+  HAND_TILT_DEG: ['Tilt', 'A car on its wheels can\'t roll sideways; a hand always tilts it. Roll (gy) is added up in both directions, and this many degrees means “in a hand”. Lower = HAPPY triggers more easily, but bumps may count.'],
+  HAND_TILT_MS: ['Tilt window', 'The roll must add up to Tilt within this time, otherwise the count restarts.'],
+  HAND_ROLL_MS: ['Roll gate', 'A roll must last this long before it starts counting at all. Filters out taps and knocks on the car.'],
+  HAND_QUIET_DPS: ['Quiet below', 'Roll rates below this are treated as sensor noise and not added to Tilt.'],
+  HAND_QUIET_MS: ['Quiet clears', 'Being quiet (below Quiet below) this long clears the roll count. The brief stops while a hand turns the car are shorter, so they don\'t clear it.'],
+  STILL_RMS: ['Still RMS', 'Vibration below this counts as “still” — used to decide the car was put down. At rest ≈ 0.5, held in a palm ≈ 35.'],
+  HAND_SETTLE_MS: ['Settle', 'Still for this long = set back down: leaves hand mode, so HAPPY ends and FAST can work again.'],
+};
+
+let car = null, DEF = null;       // the car's live values and the sketch defaults it was built with
+let online = false;
+
+const $ = id => document.getElementById(id);
+function msg(t, kind = '') {
+  $('msg').textContent = t;
+  $('msg').className = kind;
+  clearTimeout(msg.t);
+  if (kind !== 'bad') msg.t = setTimeout(() => { $('msg').textContent = ''; }, 6000);
+}
+
+for (const [card, list] of Object.entries(FIELDS)) {
+  const box = document.querySelector(`[data-fields="${card}"]`);
+  for (const [k, label, unit] of list) {
+    box.insertAdjacentHTML('beforeend',
+      `<div class="row"><label for="${k}">${label}</label>
+       <input id="${k}" data-key="${k}" type="number" step="any">
+       <span class="unit">${unit}</span><span class="info" tabindex="0" data-tip="${k}">i</span></div>`);
+  }
+}
+
+// ------------------------------------------------------------ hover info
+
+const tip = document.createElement('div');
+tip.id = 'tip';
+document.body.appendChild(tip);
+function showTip(el) {
+  const k = el.dataset.tip;
+  const [title, text] = TIPS[k] || [k, ''];
+  const show = v => k.startsWith('STATE_') ? (v ? 'on' : 'off') : v;
+  let small = '';
+  if (DEF && k in DEF) {
+    const now = car[k] !== DEF[k] ? ` · on car ${show(car[k])}` : '';
+    small = `<small>sketch default ${show(DEF[k])}${now} · config.h ${k}</small>`;
+  }
+  tip.innerHTML = `<b>${title}</b>${text}${small}`;
+  const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
+  let top = r.bottom + 8;
+  if (top + h > innerHeight - 8) top = r.top - h - 8;     // no room below: open above
+  tip.style.left = left + 'px'; tip.style.top = top + 'px';
+  tip.classList.add('show');
+}
+const hideTip = () => tip.classList.remove('show');
+for (const el of document.querySelectorAll('.info')) {
+  el.addEventListener('mouseenter', () => showTip(el));
+  el.addEventListener('focus', () => showTip(el));
+  el.addEventListener('mouseleave', hideTip);
+  el.addEventListener('blur', hideTip);
+  el.addEventListener('click', e => e.preventDefault());   // inside a state chip: don't toggle it
+}
+
+// ------------------------------------------------------------ form state
+
+const inputs = card => [...document.querySelectorAll(`[data-card="${card}"] [data-key]`)];
+const valueOf = el => el.type === 'checkbox' ? (el.checked ? 1 : 0) : parseFloat(el.value);
+
+function load(card, from) {
+  for (const el of inputs(card)) {
+    const k = el.dataset.key;
+    if (el.type === 'checkbox') el.checked = !!from[k]; else el.value = from[k];
+  }
+}
+
+// The car checks all of this too (cfg.cpp), plus each field's range; this is so the
+// mistake shows while typing.
+function problems() {
+  const v = k => parseFloat($(k).value);
+  const p = {};
+  if (!(v('FAST_EXIT_RMS') < v('FAST_ENTER_RMS'))) p.FAST_EXIT_RMS = `must be below Enter RMS (${v('FAST_ENTER_RMS')})`;
+  if (!(v('SHAKE_REARM_DPS') < v('SHAKE_DPS'))) p.SHAKE_REARM_DPS = `must be below Swing line (${v('SHAKE_DPS')})`;
+  if (!(v('DIZZY_AFTER_MS') >= v('EXIT_HOLD_MS'))) p.DIZZY_AFTER_MS = `must be ≥ Exit hold (${v('EXIT_HOLD_MS')})`;
+  for (const el of document.querySelectorAll('input[type=number]'))
+    if (!(el.value !== '' && parseFloat(el.value) >= 0)) p[el.dataset.key] = 'needs a number ≥ 0';
+  return p;
+}
+
+function refresh() {
+  const ready = !!(online && car);
+  for (const el of document.querySelectorAll('[data-key], button')) el.disabled = !ready;
+  $('export').disabled = !ready || !exportOK;
+  if (!ready) return;
+  const bad = problems();
+  let differ = 0;
+  for (const el of document.querySelectorAll('[data-key]')) {
+    const k = el.dataset.key, val = valueOf(el);
+    if (car[k] !== DEF[k]) differ++;
+    const edited = val !== car[k];
+    if (el.type === 'checkbox') { el.parentElement.classList.toggle('changed', edited); continue; }
+    el.classList.toggle('bad', !!bad[k]);
+    el.classList.toggle('changed', !bad[k] && edited);
+    el.classList.toggle('custom', !bad[k] && val !== DEF[k]);
+    el.title = bad[k] ? '✗ ' + bad[k] : '';
+  }
+  for (const card of document.querySelectorAll('.card')) {
+    const first = [...card.querySelectorAll('input[type=number]')].find(el => bad[el.dataset.key]);
+    card.querySelector('.apply').disabled = !!first;
+    card.querySelector('.err').textContent = first
+      ? `✗ ${first.closest('.row').querySelector('label').textContent} ${bad[first.dataset.key]}` : '';
+    const st = card.dataset.state;
+    if (st) {
+      card.classList.toggle('off', !car[st]);
+      card.querySelector('.offnote').style.display = car[st] ? 'none' : '';
+    }
+  }
+  $('differ').textContent = differ ? `${differ} differ from sketch` : 'matches sketch';
+  $('differ').style.color = differ ? 'var(--accent)' : 'var(--ok)';
+  $('sneed').textContent = car.SHAKE_SWINGS; $('swin').textContent = car.SHAKE_WINDOW_MS;
+  $('lspinneed').textContent = car.SPIN_HOLD_MS; $('ltilt').textContent = car.HAND_TILT_DEG;
+  const scale = Math.max(car.FAST_ENTER_RMS * 2, 1);
+  $('mexit').style.left = (car.FAST_EXIT_RMS / scale * 100) + '%';
+  $('menter').style.left = (car.FAST_ENTER_RMS / scale * 100) + '%';
+}
+
+// ------------------------------------------------------------ talking to the car
+
+let exportOK = false;
+function took(r) {                  // a /api/car/config answer
+  online = !!r.online;
+  if (r.export) {
+    exportOK = r.export.ok;
+    $('export').title = r.export.ok ? `Rewrite the #define lines in ${r.export.path}` : r.export.error;
+  }
+  if (r.config) { car = r.config.cur; DEF = r.config.def; }
+  $('saved').textContent = online && car ? '✓ saved on car' : '';
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} :
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+  return j;
+}
+
+// Load (or reload after the car came back): every card shows the car's values.
+async function fetchConfig() {
+  try {
+    const r = await api('/api/car/config');
+    const was = !!car;
+    took(r);
+    if (!online) { msg(r.error || 'car not connected', 'bad'); }
+    else if (!was) { for (const c of document.querySelectorAll('.card')) load(c.dataset.card, car); msg(''); }
+  } catch (e) {
+    online = false;
+    msg('server not reachable — ' + e.message, 'bad');
+  }
+  refresh();
+}
+
+for (const card of document.querySelectorAll('.card')) {
+  const name = card.dataset.card;
+  card.querySelector('.apply').onclick = async () => {
+    const set = {};
+    for (const el of inputs(name)) if (valueOf(el) !== car[el.dataset.key]) set[el.dataset.key] = valueOf(el);
+    const keys = Object.keys(set);
+    if (!keys.length) { msg('nothing changed'); return; }
+    try {
+      took(await api('/api/car/config', { set }));
+      load(name, car);
+      msg(`applied ${keys.join(', ')} — saved on car`, 'good');
+    } catch (e) {
+      msg('not applied: ' + e.message, 'bad');
+    }
+    refresh();
+  };
+  card.querySelector('.reset').onclick = () => {
+    load(name, DEF);
+    msg('sketch defaults filled in — Apply to send them');
+    refresh();
+  };
+}
+document.addEventListener('input', refresh);
+document.addEventListener('change', refresh);
+
+$('resetAll').onclick = async () => {
+  try {
+    took(await api('/api/car/config', { reset: true }));
+    for (const c of document.querySelectorAll('.card')) load(c.dataset.card, car);
+    msg('every setting back to the sketch defaults', 'good');
+  } catch (e) {
+    msg('reset failed: ' + e.message, 'bad');
+  }
+  refresh();
+};
+
+$('export').onclick = async () => {
+  try {
+    const r = await api('/api/car/config/export', {});
+    msg(r.changed && r.changed.length
+      ? `config.h: ${r.changed.length} line(s) rewritten (${r.changed.join(', ')}) — flash the sketch to make them the defaults`
+      : 'config.h already matches the car', 'good');
+  } catch (e) {
+    msg('export failed: ' + e.message, 'bad');
+  }
+};
+
+// ------------------------------------------------------------ live sensor line
+
+// T <ms> <gx> <gy> <gz> <qw> <qx> <qy> <qz> <rms> <jitter> <rollAcc> <ctx> <swings> <state> <spinMs>
+function onT(line) {
+  const f = line.trim().split(/\s+/);
+  if (f.length < 15) return;
+  const rms = +f[8], roll = +f[10], sw = f[12].split('/'), spin = +f[14];
+  $('state').textContent = f[13];
+  $('lrms').textContent = rms.toFixed(1); $('lrms2').textContent = rms.toFixed(1);
+  if (car) $('mrms').style.width = Math.min(100, rms / Math.max(car.FAST_ENTER_RMS * 2, 1) * 100) + '%';
+  [$('sx').textContent, $('sy').textContent, $('sz').textContent] = sw;
+  $('lgz').textContent = (+f[3]).toFixed(0);
+  $('lspin').textContent = spin;
+  if (car) $('mspin').style.width = Math.min(100, spin / Math.max(car.SPIN_HOLD_MS, 1) * 100) + '%';
+  $('lctx').textContent = f[11] === 'H' ? 'HAND' : 'FLOOR';
+  $('lroll').textContent = roll.toFixed(0);
+}
+
+const es = new EventSource('/api/telemetry');
+es.addEventListener('t', e => onT(e.data));
+es.addEventListener('link', e => {
+  const l = JSON.parse(e.data);
+  const back = l.online && !online;
+  $('dot').className = 'dot' + (l.online ? ' on' : '');
+  $('cartext').textContent = l.online ? `connected ${l.port}` : (l.error || 'offline');
+  if (!l.online) { online = false; car = null; $('saved').textContent = ''; $('state').textContent = '–'; refresh(); }
+  if (back) fetchConfig();          // plugged back in, or rebooted: show what it runs now
+});
+es.onerror = () => {
+  $('dot').className = 'dot';
+  $('cartext').textContent = 'server not reachable — retrying';
+};
+
+fetchConfig();
+</script>
+</body>
+</html>

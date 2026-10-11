@@ -5,6 +5,11 @@
 //   GET <n>         -> OK <len> + <len> raw bytes of the slot's .qgif
 //   PUT <n> <len>   -> READY <chunk>, then the payload a chunk at a time, each
 //                      answered ACK <got> once it is on flash, then OK <bytes>
+//   CFG             -> OK {"cur":{NAME:value,...},"def":{...}}  (state conditions, cfg.h)
+//   CFG SET NAME=v NAME=v ...  -> the same, after applying and saving all of them;
+//                      ERR <why> and nothing changed if any one is rejected
+//   CFG RESET       -> the same, back to the config.h defaults
+// A line longer than CMD_LINE_MAX is answered ERR and ignored, never cut short.
 // Replies start with OK / ERR / READY / ACK; any other line is telemetry or a debug log.
 // A PUT blocks the loop for the transfer.
 #pragma once

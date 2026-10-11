@@ -21,6 +21,8 @@ float gyroSensitivity() { return 0.07f; }        // FS 2000 dps
 
 #include "motion.cpp"
 
+MotionCfg cfg = CFG_DEFAULTS;                    // cfg.cpp owns it on the car (LittleFS)
+
 static const float K = 0.07f;
 static GyroRaw mk(float gx, float gy, float gz) {
   return GyroRaw{ (int16_t)lrintf(gx / K), (int16_t)lrintf(gy / K), (int16_t)lrintf(gz / K) };
@@ -71,7 +73,9 @@ static void expectCtx(const char *what, bool want) {
 
 // The bias survives motionReset() (calibration owns it) and the rest-time correction moves
 // it, so zero it here or one scenario's long rest leaks into the next.
-static void reset() { fakeMillis = 1000; motionSetBias(0, 0, 0); motionReset(); sawDizzy = false; }
+static void reset() {
+  fakeMillis = 1000; motionSetBias(0, 0, 0); cfg = CFG_DEFAULTS; motionReset(); sawDizzy = false;
+}
 static void expectNoDizzy(const char *what) {
   if (sawDizzy) fails++;
   printf("  %s %-46s %s\n", sawDizzy ? "FAIL" : "ok  ", what,
@@ -421,6 +425,30 @@ int main() {
   expectCalib("floor rumble the whole window", rumble, true);
   expectCalib("held in a palm", palm, false);
   expectCalib("still in the hand for 0.9 s of 1.5 s", setDownLate, false);
+
+  // --- 12. settings changed at runtime (/configs) take effect on the next sample ------
+  printf("runtime config\n");
+  reset();
+  cfg.stateDizzy = 0;
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(0.0f, 0.0f, 450.0f, 125, 1000);
+  expectNoDizzy("DIZZY switched off: a hard shake is not dizzy");
+  reset();
+  cfg.shakeSwings = 3;
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(0.0f, 0.0f, 450.0f, 300, 1000);       // 4 swings: short of 6, enough for 3
+  expect("SHAKE_SWINGS 3: four swings are enough", DIZZY);
+  reset();
+  cfg.shakeDps = 600.0f;
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  shakeFor(0.0f, 0.0f, 450.0f, 125, 1000);
+  expectNoDizzy("SHAKE_DPS 600: a 450 dps shake is not dizzy");
+  reset();
+  cfg.stateFast = 0;
+  feed(0.5f, 0.5f, 0.5f, 1000);
+  feed(6.0f, 1.5f, 3.0f, 1500);
+  expect("FAST switched off: driving shows NORMAL", NORMAL);
+  cfg = CFG_DEFAULTS;
 
   printf("\n%s\n", fails ? "FAILURES" : "all scenarios pass");
   return fails != 0;

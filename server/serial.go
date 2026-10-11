@@ -10,6 +10,7 @@
 //	GET <n>       -> OK <len> + <len> raw bytes
 //	PUT <n> <len>  -> READY <chunk>, then one chunk at a time, each answered
 //	                  ACK <got> when it is on flash, and OK <bytes> at the end
+//	CFG [SET NAME=v ... | RESET] -> OK {"cur":{...},"def":{...}} (config.go)
 package main
 
 import (
@@ -37,6 +38,11 @@ const (
 )
 
 var errTimeout = errors.New("car did not answer (is it running emocar firmware?)")
+
+// carError is the car's own ERR reply: it answered, so the link itself is fine.
+type carError string
+
+func (e carError) Error() string { return "car: " + string(e) }
 
 // ---------------------------------------------------------------- the link
 
@@ -163,7 +169,7 @@ func (l *carLink) reply(deadline time.Time) (string, string, error) {
 		case "OK", "READY", "ACK":
 			return verb, rest, nil
 		case "ERR":
-			return "", "", fmt.Errorf("car: %s", rest)
+			return "", "", carError(rest)
 		}
 		// anything else is non-protocol output
 	}
@@ -221,6 +227,35 @@ func (l *carLink) Status() (json.RawMessage, error) {
 		out = json.RawMessage(rest)
 		return nil
 	})
+	return out, err
+}
+
+// Config sends one CFG command — args "" reads, "SET NAME=v ..." or "RESET" change — and
+// returns the car's {"cur":{...},"def":{...}}.
+func (l *carLink) Config(args string) (json.RawMessage, error) {
+	var out json.RawMessage
+	var refused carError
+	cmd := strings.TrimSpace("CFG " + args)
+	err := l.do(func() error {
+		if err := l.send(cmd); err != nil {
+			return err
+		}
+		_, rest, err := l.reply(time.Now().Add(replyTimeout))
+		if errors.As(err, &refused) {
+			return nil // a rejected value, not a broken link: keep the port
+		}
+		if err != nil {
+			return err
+		}
+		if !json.Valid([]byte(rest)) {
+			return fmt.Errorf("bad config payload: %.60q", rest)
+		}
+		out = json.RawMessage(rest)
+		return nil
+	})
+	if err == nil && refused != "" {
+		err = refused
+	}
 	return out, err
 }
 

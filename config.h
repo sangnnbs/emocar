@@ -87,12 +87,19 @@
 #define ANIM_MAX_FRAMES 255
 #define ANIM_MAX_BYTES  (11UL + 2 * ANIM_MAX_FRAMES + (uint32_t)DISP_FRAME_BYTES * ANIM_MAX_FRAMES)
 #define SER_IO_TIMEOUT_MS 3000          // per-byte deadline during a transfer
-#define CMD_LINE_MAX      64            // longest command line accepted
+#define CMD_LINE_MAX      640           // longest command line accepted (CFG SET of every field)
 #define CMD_CHUNK         1024          // upload chunk; the car ACKs each one
 #define CMD_RX_BUF        4096          // USB RX queue, must hold a chunk
 
+// ---------- state conditions: the defaults ----------
+// Every number from here to "derived", except RMS_WINDOW_MS (it sizes an array), is a
+// default. The server's /configs page changes
+// them live on the car (cfg.h, saved on flash) and its Export button writes them back
+// into these lines — keep each one `#define NAME value`. Flashing a sketch with different
+// defaults drops whatever the car had saved.
+
 // ---------- registered states ----------
-// An unregistered state is never shown and its detector does not run. NORMAL is always on.
+// A state switched off is never shown. NORMAL is always on.
 // The host tests override these to 1 (test/Makefile).
 #ifndef STATE_FAST
 #define STATE_FAST   0
@@ -153,5 +160,3 @@
 
 // ---------- derived ----------
 #define RMS_WINDOW  (RMS_WINDOW_MS * 1000 / SAMPLE_US)
-// With only NORMAL registered the gyro is never started.
-#define USE_GYRO    (STATE_FAST || STATE_DIZZY || STATE_HAPPY)
