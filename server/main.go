@@ -1,7 +1,7 @@
 // emocar-server — web UI on the PC that converts emoji GIFs to .qgif and
 // pushes them to the car over its USB cable (see serial.go). See README.md.
 //
-//	./emocar-server                  # http://localhost:8080, car auto-detected, GIFs in ./gifs
+//	./emocar-server                  # opens http://localhost:8080, car auto-detected, GIFs in ./gifs
 //	./emocar-server -port /dev/ttyACM0 -listen :8080 -lib ../emoji_lib,../downloads/00_Main
 package main
 
@@ -12,9 +12,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -398,6 +401,7 @@ func main() {
 	lib := flag.String("lib", gifs, "comma-separated GIF library dirs")
 	uploads := flag.String("uploads", gifs, "where browser uploads are stored")
 	flag.StringVar(&sketchDir, "sketch", "..", "firmware folder whose config.h /configs Export rewrites")
+	open := flag.Bool("open", true, "open the web UI in the default browser once the server is up")
 	flag.Parse()
 	car = newCarLink(*port)
 	libDirs = strings.Split(*lib, ",")
@@ -444,5 +448,45 @@ func main() {
 		where = "auto-detect"
 	}
 	log.Printf("emocar server on %s, car port %s, library: %s, uploads: %s", *listen, where, *lib, uploadsDir)
-	log.Fatal(http.ListenAndServe(*listen, nil))
+	// Listen before opening the browser, so the page never races the server.
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if *open {
+		openBrowser(uiURL(ln.Addr()))
+	}
+	log.Fatal(http.Serve(ln, nil))
+}
+
+// uiURL turns the listen address into one a browser can open: ":8080" and
+// "0.0.0.0:8080" both become http://localhost:8080.
+func uiURL(addr net.Addr) string {
+	port := "8080"
+	if a, ok := addr.(*net.TCPAddr); ok {
+		port = strconv.Itoa(a.Port)
+		if !a.IP.IsUnspecified() {
+			return "http://" + net.JoinHostPort(a.IP.String(), port)
+		}
+	}
+	return "http://localhost:" + port
+}
+
+// openBrowser hands the URL to the OS's default browser. Failing is fine: the URL is
+// in the log line above, and a headless box has no browser to open.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		log.Printf("open %s in a browser (%v)", url, err)
+		return
+	}
+	go cmd.Wait() // reap it; xdg-open exits as soon as the browser has the URL
 }

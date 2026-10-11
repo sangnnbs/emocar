@@ -29,6 +29,23 @@ and a driver backend to `../display.cpp`.
 
 ## Run
 
+### From a release download
+
+Put the binary in a folder of its own (the GIF library is created next to it), plug the
+car in, start it — the browser opens http://localhost:8080 by itself.
+
+| OS | File | Start it |
+|---|---|---|
+| Windows x64 | `emocar-server_<ver>_windows_amd64.exe` | double-click; SmartScreen: **More info → Run anyway**. Closing the console window stops it |
+| Linux x64 | `emocar-server_<ver>_linux_amd64` | `chmod +x emocar-server_*` then `./emocar-server_<ver>_linux_amd64`; Ctrl+C stops it |
+| Linux ARM64 | `emocar-server_<ver>_linux_arm64` | same as Linux x64 |
+| macOS | — | not built yet; `cd server && go build` on the Mac |
+
+Linux needs serial access once: `sudo usermod -aG dialout $USER`, then log out and in.
+On a box with no browser (or to skip it) pass `-open=false`.
+
+### From the repo
+
 ```bash
 cd ~/sang/esp32/emocar/server
 make run                        # build + UI on http://localhost:8080
@@ -39,7 +56,7 @@ make run                        # build + UI on http://localhost:8080
 
 Plug the car in over USB. The server finds it by its Espressif USB id (VID `303A`) —
 `-port /dev/ttyACM0` (or `COM5`, `/dev/cu.usbmodem…`) overrides that when more than one
-ESP32 is attached. Other flags: `-listen`, `-lib` (comma-separated library dirs),
+ESP32 is attached. Other flags: `-open` (open the UI in the default browser on start; default on), `-listen`, `-lib` (comma-separated library dirs),
 `-uploads` (where browser-added GIFs are saved), `-sketch` (the firmware folder whose
 `config.h` the `/configs` Export rewrites; default `..`, the repo when run from `server/`).
 

@@ -92,6 +92,18 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc -p /dev/ttyACM0 emo
 arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
 ```
 
+**From a release** (no Arduino needed): the GitHub release carries two firmware files.
+`emocar-firmware_<ver>_esp32c3_app.bin` goes at `0x10000` and updates a car while keeping
+its uploaded GIFs and /configs values; `…_full.bin` goes at `0x0` on a blank board and
+wipes them (it covers the whole 4 MB, LittleFS included).
+
+```bash
+esptool --chip esp32c3 -p /dev/ttyACM0 write_flash 0x10000 emocar-firmware_<ver>_esp32c3_app.bin
+```
+
+Or in Chrome/Edge with nothing installed: https://espressif.github.io/esptool-js/ →
+Connect → add the file at the offset above → Program.
+
 The upload server owns the same port while it runs — stop it (`make -C server down`)
 before flashing or opening a monitor.
 
