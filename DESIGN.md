@@ -66,8 +66,7 @@ for the server's dashboard (`/dashboard`, telem.*) runs only while the server as
 ⚠️ The calibration window is where things go wrong silently: if the car is moving during
 those 1.5 s the motion is averaged into the zero-rate bias, and every reading afterwards
 carries the offset. A stuck state with a constant non-zero axis at rest is this, not a
-sensor fault — reset with the car flat and still. (PLANS.md P4.1 is the fix: boot waits until
-the car is not being turned, and at rest the bias re-zeroes itself.)
+sensor fault — reset with the car flat and still.
 
 ## Calibration (P4.1)
 
@@ -247,8 +246,9 @@ error screen.
 ## USB upload link
 
 The serial link replaced a WiFi AP + HTTP server whose ~80–100 mA cost half the battery
-life (see PLANS.md). A command line is followed by a fixed-length raw payload — the serial
-equivalent of Content-Length — streamed straight to LittleFS, never buffered in RAM.
+life (WiFi returns behind a button — see PLANS.md). A command line is followed by a
+fixed-length raw payload — the serial equivalent of Content-Length — streamed straight to
+LittleFS, never buffered in RAM.
 
 One chunk is in flight at a time, ACKed only once it is on flash. USB CDC is not reliable
 end to end: the driver's ISR drops whatever doesn't fit its RX queue and nothing
@@ -280,4 +280,4 @@ swings split across two axes, a slow or
 broken or reversing spin, a wiggle and a knock must not reach DIZZY. A steady spin must not
 be learned as bias, and rms must come back to rest after a hard shake (it used to go NaN).
 The blind spot is the magnitudes — a scenario is only as honest as the numbers fed into
-it, so thresholds still have to be confirmed on real hardware (PLANS.md P5).
+it, so thresholds still have to be confirmed on real hardware (`/dashboard`, `/configs`).
