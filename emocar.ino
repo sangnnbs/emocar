@@ -21,7 +21,7 @@
  *   telem.*      live sensor line + orientation for the server's /dashboard
  *
  * Wiring: see wiring.md. GY-50 and SH1106 share 3V3/GND, SDA GPIO8, SCL GPIO9.
- * Design notes: README.md.
+ * Design notes: DESIGN.md.
  */
 
 #include <Arduino.h>

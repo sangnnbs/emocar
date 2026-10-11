@@ -1,0 +1,283 @@
+# emocar — design notes
+
+The reasoning behind the code, moved out of the source comments and the README. Dates are
+when a fix was measured or made.
+
+## State machine at a glance
+
+Priority DIZZY > HAPPY > FAST > NORMAL. HAPPY says *where the car is*, and while it is held
+FAST doesn't apply — so FAST only ever has to describe a car on a surface. DIZZY sits above
+it because a shake happens in a hand: below HAPPY it could never show. Every condition has hysteresis (`*_EXIT_*`) and must hold long enough to
+prove itself: a fingernail is louder than anything the car does, and only its shortness
+tells it apart. The ladder itself is fast going up (`ENTER_HOLD_MS`) and slow coming down
+(`EXIT_HOLD_MS`), so a reaction is instant and a feeling wears off.
+
+Raw samples pass a median-of-3 despike first (`DESPIKE_MEDIAN3`). Thresholds were measured
+on tinicar with the `../L3G4200D` telemetry sketch; retune there and copy, then run the host
+tests (below).
+
+**Registered states.** Each state but NORMAL has a flag in config.h (`STATE_FAST`,
+`STATE_DIZZY`, `STATE_HAPPY`; DIZZY + HAPPY on as of 2026-10-10). A state switched off never
+shows. With HAPPY off, a car held in a hand shows NORMAL, never FAST. The host tests
+register all four. With only NORMAL on the gyro is not started at all: the car boots
+straight to 🙂 with or without a working gyro (switching a state on from /configs then
+reboots it once, to calibrate).
+
+**Live tuning.** The state flags and every threshold below them in config.h are only
+defaults: the server's `/configs` page changes them on the running car (`cfg.*`, saved in
+`/cfg.bin` on flash, `CFG` commands in cmd.h) and **Export** writes the car's values back
+into config.h. The saved file is stamped with a hash of the defaults it was made under, so
+flashing a sketch with different defaults drops it — after Export + flash, nothing is lost.
+
+## Animations
+
+Each state plays `/anim<N>.qgif` from LittleFS; if the file is missing or invalid the
+code-drawn placeholder face from `anim_data.h` (PROGMEM) is shown instead. Animations are
+**uploaded over the USB cable, not compiled in** — see [server/README.md](server/README.md).
+
+The car stores only the four active animations; the GIF library stays on the PC.
+Uploaded animations survive power cycles and firmware reflashes (LittleFS is its own
+partition). File frames stream from flash 1 KB at a time, so size is bounded by the
+partition (~1.5 MB), not RAM; ≤ 255 frames per animation.
+
+`mkanim.py` (no args) only regenerates the placeholder `anim_data.h` now.
+
+The player never blocks: a frame is drawn when its delay elapses, and the gyro FIFO (32 samples
+= 160 ms at 200 Hz) rides out the ~25 ms an SH1106 frame takes on the bus. A state change
+restarts the new animation at frame 0 immediately.
+
+## Boot, serial and debug log
+
+Boot sequence on the OLED: blank → `CALIBRATING keep still`
+(1.5 s, car on the floor; a tap or a bump is fine, being picked up makes it wait) → 🙂.
+`CALIB_UI 0` (the default) hides the calibration screen: the panel stays blank through it.
+With only NORMAL registered calibration is skipped entirely, so it goes blank → 🙂. `GYRO ERROR` means no ACK at 0x69, wrong WHO_AM_I or no data — see
+the checklist in wiring.md. The car keeps retrying every 2 s, so reseating the wire is enough;
+no reset needed. During an upload the OLED shows `UPDATING` for a second or two.
+
+Serial (115200) carries the animation upload protocol (`cmd.*`), whose replies are the
+lines starting `OK` / `ERR` / `READY` / `ACK`. Production builds print nothing else.
+For development, `DEBUG_LOG 1` in config.h adds debug lines: boot, calibration, gyro faults, `>>> OLD -> NEW` on every state
+change, and every `DEBUG_PRINT_MS` a line of `gx gy gz | peak |gx| |gy| |gz| | rms |
+ctx roll | swings x/y/z spin-ms | state`. Faults also show on the OLED. The sensor stream
+for the server's dashboard (`/dashboard`, telem.*) runs only while the server asks for it
+(`TELEM`), so a car nobody is watching stays silent.
+
+⚠️ The calibration window is where things go wrong silently: if the car is moving during
+those 1.5 s the motion is averaged into the zero-rate bias, and every reading afterwards
+carries the offset. A stuck state with a constant non-zero axis at rest is this, not a
+sensor fault — reset with the car flat and still. (PLANS.md P4.1 is the fix: boot waits until
+the car is not being turned, and at rest the bias re-zeroes itself.)
+
+## Calibration (P4.1)
+
+A bias measured while the car is being *turned* is silently poisoned: the offset is baked
+in and every later reading carries it, so the car can sit motionless reading 18 dps and
+never return to NORMAL (the "+18.5 dps gz" incident). A tap, a bump of the table or a
+rumble through the floor is not that — it rattles the gyro but turns nothing, is brief, and
+averages to zero. The old all-samples-steady test threw the whole window away over it.
+
+So the `CALIB_MS` window is cut into `CALIB_BLOCK_MS` blocks, each block is averaged (a
+rattle cancels inside it), and the bias is the mean of the blocks within `CALIB_AGREE_DPS`
+of the per-axis median. The median is what makes a tap harmless: it cannot move it without
+spoiling half the window. A tap spoils a block or two and is outvoted; a hand turns the car
+at a different rate every moment, so its blocks never agree. The window rolls one block at
+a time, so a disturbance delays calibration and never restarts it.
+
+A gyro that answers on I²C but delivers no samples (a wedged chip does the one without the
+other) fails calibration and is re-initialised.
+
+`CALIB_UI 0` (2026-09-26, MVP): the panel shows nothing until the face appears instead of
+showing `CALIBRATING`. The `emocar` splash with the pin numbers was dropped for production
+on 2026-10-10. `GYRO ERROR` screens are unaffected — those say something is broken,
+not that the car is busy.
+
+## Jitter and re-zeroing (P4.2)
+
+Stillness is judged by *jitter* — the wobble around the window mean, i.e. RMS with any
+constant offset removed (var = E[g²] − E[g]²) — never by the mean itself. A wrong bias moves
+the mean without moving the jitter: the poisoned bias above read +18.5 dps on gz while the
+sample-to-sample wobble stayed at ±0.5, so a level test sees a violently spinning car and a
+jitter test sees a perfectly still one.
+
+While jitter stays below `REST_JITTER_DPS` for `REZERO_AFTER_MS`, the residual mean leaks
+into the bias with time constant `REZERO_TAU_MS`. This corrects temperature drift and —
+the reason it exists — lets a car whose bias was poisoned at boot recover by itself once it
+is set down, instead of being wrong until the next reset.
+
+## Despike (2026-09-20)
+
+The FIFO hands over an impossible sample every few seconds: one axis off by exactly 256 LSB
+(17.9 dps at FS 2000) for exactly one sample, on a car lying untouched on a desk. 256 is one
+count in the *high* byte — a torn read, the low byte from one sample and the high byte from
+the next. A gyro at rest is where that is most likely, because its raw value hovers around
+zero and so crosses the 0xFFFF→0x0000 rollover constantly. CTRL_REG4's BDU bit is the
+register-level cure and it is on, but BDU protects the output registers; samples read
+through the FIFO do not pass through them.
+
+Measured: 5 spikes in 30 s untouched, every one exactly 256 LSB. One is enough to lift the
+50-sample RMS from 0.6 to 2.6 and flip the face to FAST. It is also almost certainly the
+"+18.5 dps gz" that poisoned a boot calibration — same magnitude, random axis, car still.
+
+A median of three kills an isolated outlier outright and leaves everything else alone: the
+odd one out is never the middle one, and real motion moves all three together. It costs one
+sample of lag (5 ms). The history is kept of *raw* samples, so a spike cannot bias the next
+two decisions.
+
+## Gyro reset state and watchdog
+
+An ESP32 reset does not power-cycle the gyro, so it still holds whatever the last run left:
+FIFO on, stream mode, 32 samples queued and OVRN set (dumped on the bench). `gyroBegin()`
+puts it back in the state the callers assume — FIFO off so calibration reads live data, and
+bypass mode, which also empties the FIFO so stream mode starts clean.
+
+A wedged sensor is indistinguishable from a perfectly still car by any measure of the data
+— zero jitter, zero motion. Only the absence of *new* samples gives it away. Without the
+watchdog the car keeps showing whichever face it computed last, which reads as a stuck
+emotion rather than a fault (seen four times on the bench in one session). After
+`GYRO_TIMEOUT_MS` without samples it shows `GYRO ERROR` and re-inits every `GYRO_RETRY_MS`.
+
+Boot used to `halt()` on a gyro that did not answer, which turned a jostled wire — or a chip
+that missed the first boot after a flash — into a manual reset. Same policy now as the
+watchdog: say what is wrong, keep trying, come back by itself.
+
+## The priority ladder
+
+The commit hold depends on which way the state moves along the ladder (DIZZY > HAPPY >
+FAST > NORMAL): going up takes `ENTER_HOLD_MS`, coming down `EXIT_HOLD_MS`. Fast attack,
+slow decay — a startle is instant, calming down lingers, and a big reaction does not snap
+off as if nothing happened. These holds gate the state flip, not the conditions.
+
+The ladder rank lives in `PRIORITY[]`, separate from the enum, because the enum is slot
+order and append-only: DIZZY is slot 2 but ranks above HAPPY (slot 3). HAPPY outranks
+FAST because it reports *where the car is*; DIZZY outranks HAPPY because shaking only
+happens in a hand, so anything below HAPPY could never show it.
+
+## FAST
+
+FAST is a *floor* state: the context bit decides the situation first, so no threshold has
+to be chosen to avoid being tripped by handling.
+
+`FAST_ENTER_RMS` went 4.0 → 2.5 once the context bit took over, then back to 4.0 on
+2026-09-20: on the real car a fingernail tap, a nudge or a knock on the table read as FAST.
+A tap spikes RMS to 40+, so no placeable level rejects it — `FAST_HOLD_MS` carries that
+fix. A touch is loud but brief and only lifts the RMS for about one `RMS_WINDOW_MS`; real
+rolling is quieter but goes on, so the dwell must sit clearly above that window. The level
+still matters for a *continuously* trembling surface, so it sits above the small stuff and
+well clear of the 0.5–0.6 resting noise floor. Leaving is immediate on level alone;
+`EXIT_HOLD_MS` decides how long the face stays.
+
+Soft surfaces (bed, sofa, carpet) damp most of what a table transmits: if a car pushed
+across one stops reaching FAST, lower `FAST_ENTER_RMS` toward 3.0 — the dwell keeps taps
+out on its own now, which the 2.5 experiment did not have.
+
+## DIZZY
+
+Two triggers:
+
+- **Shake:** `SHAKE_SWINGS` (6) swings past ±`SHAKE_DPS` (400), either direction, within
+  `SHAKE_WINDOW_MS` (2 s), on any one of gx, gy, gz. Each axis counts on its own; counts are
+  never added across axes. A swing is the axis crossing the line; that side only counts again
+  once it falls back under `SHAKE_REARM_DPS` (200), so hovering around 400 is one swing.
+- **Spin:** |gz| above `SPIN_GZ_DPS` (300) one way for `SPIN_HOLD_MS` (5 s): the car driving
+  in circles. A dip shorter than `SPIN_DIP_MS` (200 ms) doesn't break it; a reversal starts over.
+
+DIZZY shows from the trigger until `DIZZY_AFTER_MS` (2 s) after the last swing or the end of
+the spin, step-down included. It outranks HAPPY: shaken in a hand, the car goes dizzy, then
+back to HAPPY.
+
+Recorded on the car with the dashboard on 2026-10-10 (one peak per 40 ms, so the car sees a
+little more):
+
+| Motion | rms | peaks | swings past 400, best 2 s (gx/gy/gz) |
+|---|---|---|---|
+| held still in a hand | ≤ 80 | ≤ 110 | 0/0/0 |
+| pickup / put down | 83–257 | 101–403 | 0/0/1 |
+| hard shake | 300–787 | 300–1095, all axes | 10/11/5 |
+
+gz alone missed that shake (5 < 6), which is why every axis counts. Its gentler second half
+reached 6 on no axis, so DIZZY ended about 5 s before the shaking did.
+
+The spin numbers are not measured yet. A steady spin has almost no jitter, so the rest-time
+bias correction is also gated on a small mean (`REZERO_MAX_DPS`); otherwise a 5 s spin was
+being learned as bias. Earlier DIZZY rules — a floor spin at 40 dps, then rms + any-axis flips
+— are in git history.
+
+## Context bit — floor vs hand
+
+Enter on roll travel: a car on wheels cannot turn about its long axis, a hand does it
+constantly. Leave on stillness: a set-down car settles (rms 0.5), a hand does not (rms
+never fell below ~10 while held, so `HAND_SETTLE_MS` of quiet really means "put down").
+Sticky on purpose: holding the car level for a moment must not read as putting it down.
+
+Travel is *unsigned*: tilting one way and back nets zero as a signed angle, yet it is still
+something only a hand can do. 25° within the 2 s window needs |gy| averaging 12.5 dps; a car
+rolling on the floor peaks around 6.
+
+The accumulator survives quiet *samples*: gy crosses zero several times a second during
+real handling, and clearing on the first quiet sample wiped the gesture before it reached
+the threshold (measured: 8 s of handling never got past 5°). Only a continuous
+`HAND_QUIET_MS` — the car lying flat — clears it.
+
+`HAND_ROLL_MS` applies the brief-vs-sustained rule to roll: travel only counts once |gy|
+has been above the noise floor continuously for that long. A tap rings gy hard for a few
+ms and used to donate a couple of degrees each time, so a fidgeting finger could walk the
+car into HAPPY without lifting it. A pickup turns the car for hundreds of ms and only loses
+this much off the front of each burst.
+
+Measured 2026-09-06 on the bare board:
+
+| Situation | Reading |
+|---|---|
+| at rest on a desk | rms 0.5–0.6, per-axis \|g\| < 0.5 (bias variance, not motion) |
+| held in a palm, casual | rms p50 35, p90 75, spikes to 255 |
+| a pickup / yank burst | rms 150–380, gz pk 400–730 |
+| car rolling (tinicar, unconfirmed) | pk ≈ 6; spin \|gz\| ≈ 60 |
+| hard shake in a hand (2026-10-10) | rms 300–787, peaks to 1095, swings past 400 in 2 s gx 10 / gy 11 / gz 5 |
+
+## Registered states
+
+Detectors are gated with plain `if (STATE_X)`, not `#if`: the compiler drops the dead
+calls, but a disabled state keeps compiling and cannot rot while it waits. The context bit
+runs whenever any of FAST/DIZZY/HAPPY is on, not just HAPPY — it is also what keeps FAST
+off while the car is in a hand. With only NORMAL registered the gyro is never
+started, so a missing or dead gyro cannot hold the display, or USB uploads, hostage on an
+error screen.
+
+## USB upload link
+
+The serial link replaced a WiFi AP + HTTP server whose ~80–100 mA cost half the battery
+life (see PLANS.md). A command line is followed by a fixed-length raw payload — the serial
+equivalent of Content-Length — streamed straight to LittleFS, never buffered in RAM.
+
+One chunk is in flight at a time, ACKed only once it is on flash. USB CDC is not reliable
+end to end: the driver's ISR drops whatever doesn't fit its RX queue and nothing
+retransmits it. Measured: 33 KB sent at once lost two thirds while LittleFS erased, and
+even a lone 1 KB burst lost 369 bytes into the stock 256-byte queue — hence `CMD_RX_BUF`
+4096. The TX timeout is 0 so a car with no terminal never stalls in a write, but that drops
+bytes on a large payload, so `GET` raises it for the transfer. `cmdPoll()` serves one
+command per loop so the gyro FIFO keeps draining.
+
+## Animation player
+
+Frames are handed to the panel driver in qgif polarity; the SH1106 backend inverts (qgif
+bit 1 = dark, U8g2 bit 1 = lit). A frame's delay is counted from the start of its draw
+(~25 ms on the bus).
+
+## Tests
+
+`motion.*` is pure logic — no I2C, no display — so it runs on the host against a fake clock:
+
+```bash
+make -C test test        # compiles motion.cpp with a stub Arduino.h and asserts each scenario
+```
+
+Scenarios cover the four states and the floor/hand context bit: pushed on the floor must
+not read as held, a pickup must reach HAPPY and stay there however violently it is then
+handled *except* by a shake on any axis or a 5 s gz spin, which reach DIZZY for 2 s past the motion.
+Pickups, two yanks out and back, gz hovering at 400, 5 swings, 6 swings over 3 s, 4 + 4
+swings split across two axes, a slow or
+broken or reversing spin, a wiggle and a knock must not reach DIZZY. A steady spin must not
+be learned as bias, and rms must come back to rest after a hard shake (it used to go NaN).
+The blind spot is the magnitudes — a scenario is only as honest as the numbers fed into
+it, so thresholds still have to be confirmed on real hardware (PLANS.md P5).

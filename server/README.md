@@ -31,7 +31,7 @@ and a driver backend to `../display.cpp`.
 
 ### From a release download
 
-See [Run a release build](../README.md#run-a-release-build) in the main README.
+See [How to run](../README.md#how-to-run) in the main README.
 
 ### From the repo
 
