@@ -1,7 +1,7 @@
 # Plans
 
 One track: **WiFi + a web app on GitHub Pages**, so cars with no USB port can be set up,
-given new GIFs and updated from a phone or a PC. Planned 2026-10-11; nothing built yet.
+given new GIFs and updated from any device with a browser (phone, PC, laptop). Planned 2026-10-11; nothing built yet.
 
 Earlier plans (state machine v2, the GIF upload tool options) are done or dropped — the
 current firmware is what users want. They live in git history (`26690b1:PLANS.md`).
@@ -156,7 +156,11 @@ stateDiagram-v2
 - **Forget the saved WiFi** with the new button.
 - No password on the car's API on the home WiFi — accepted for friends.
 
-### Flash layout — `partitions.csv`, frozen once shipped
+### Flash layout — decided in feature C, not up front
+
+Today's default layout is kept while WiFi and the car API are built. A custom layout is
+only needed if the measured WiFi firmware doesn't fit an update slot — decided in C1,
+before the first car ships with USB hidden.
 
 The C3 has 4 MB. OTA needs two app slots, so each firmware must fit one slot. Measured on
 the C3 with core 3.3.11:
@@ -169,7 +173,8 @@ the C3 with core 3.3.11:
 | WiFi setup + HTTPS + HTTPUpdate | 1,207,505 | 92% |
 | emocar + WiFi (estimated) | ≈ 1.2–1.4 MB | doesn't fit safely |
 
-The default layout is too tight and the built-in options give GIFs 128 KB or nothing. Ours:
+If the default (2 × 1.25 MB app + 1.375 MB LittleFS) is too tight — the built-in options
+give GIFs 128 KB or nothing — the fallback is:
 
 | Partition | Offset | Size | Holds |
 |---|---|---|---|
@@ -182,6 +187,8 @@ The default layout is too tight and the built-in options give GIFs 128 KB or not
 
 - Flashed **once over USB** before the port is hidden. It wipes LittleFS — GIFs get pushed again.
 - **Never changed after the first car ships**: OTA can't rewrite the partition table.
+- **896 KB is short for worst-case GIFs:** a full slot (255 frames) is ~256 KB, so 4 slots +
+  `/anim.tmp` ≈ 1.3 MB. Needs a frame cap (~150) if this layout is used.
 
 ### Car API — core `WebServer`, same origin as the app
 
@@ -264,21 +271,63 @@ flowchart LR
 - **pages:** rebuilds the whole site each time — every release's `app/<tag>/` and
   `emocar.bin` are collected again (server side, no CORS issue).
 
-## Build order
+## Features and steps
 
-1. [ ] `partitions.csv` + firmware version string; flash by USB; confirm GIFs push again
-2. [ ] WiFi setup (no button yet — on at boot while developing)
-3. [ ] Car API: `/status`, `/anim/<n>`, `POST /anim/<n>`, starter page
-4. [ ] `qgif.go` → WASM; `web/` app: state cards, upload, editor, apply
-5. [ ] `POST /update` + rollback check; firmware dropdown
-6. [ ] CI jobs + Pages (needs the repo public)
-7. [ ] The button: on/off, forget, maybe auto-off
-8. [ ] Test on iPhone, Android and a PC; range test with the C3 antenna on the car; close up
+Four features, each working on its own. **A1 comes first** (the car on WiFi); after that
+the features and their steps go in any order, limited only by each **Needs** line. CI and
+Pages are set up once, by whichever of B5 / C3 comes first. Every step ends in a check on
+the desk. A feature is done when its **Done** check passes on an iPhone, an
+Android phone and a PC.
+
+### A. WiFi setup
+
+**Needs:** nothing — A1 is the first step of the whole plan.
+
+1. [ ] Join a hard-coded home WiFi (on at boot, no button yet); IP on the OLED → ping it
+2. [ ] Hotspot `emocar-XXXX` + setup page + `/scan` + `/save` → a phone joins by the QR
+3. [ ] Saved WiFi rejoins after a reboot; the setup page says why a join failed
+
+**Done:** first setup works from all three devices; range test with the C3 antenna on the car.
+
+### B. GIFs from a browser
+
+**Needs:** A1 for B1–B2. B3 needs nothing (start anytime); B4 needs B1, or a mock car.
+
+1. [ ] `GET /status` (with the firmware version string), `GET /anim/<n>` → curl
+2. [ ] `POST /anim/<n>` → curl a `.qgif` made by the Go server; the car plays it
+3. [ ] `qgif.go` → WASM → its output matches the Go server's byte for byte
+4. [ ] `web/` app (state cards, upload, editor, apply) loaded through the starter page
+   → upload a GIF from a phone and a PC browser
+5. [ ] CI deploys `app/<tag>/` to Pages (repo is public); the starter page loads it
+
+**Done:** change every state's GIF from all three devices.
+
+### C. Firmware from a browser
+
+**Needs:** A1 for C2. C1 needs the WiFi and car-API code built (A, B1–B2) — and must be
+done before a car ships with USB hidden. C4 needs the B4 app.
+
+1. [ ] Measure the real WiFi build → keep the default layout, or switch to `partitions.csv`
+   (USB flash once, GIFs pushed again, frame cap)
+2. [ ] `POST /update` + rollback check → curl a `.bin`; a broken `.bin` rolls back
+3. [ ] CI firmware job + `fw/<tag>/emocar.bin` mirrored to Pages
+4. [ ] Firmware dropdown in the app (Releases API, older-version confirm, hard floor)
+
+**Done:** update and go back a version from all three devices.
+
+### D. WiFi button
+
+**Needs:** A1.
+
+1. [ ] Pick the GPIO; short press = WiFi on/off
+2. [ ] Long press = forget the saved WiFi
+3. [ ] Maybe auto-off after N minutes
+
+**Done:** WiFi is off by default; battery draw with WiFi off matches today's firmware.
 
 ## Open
 
 - **Button** — GPIO, short press / long press, auto-off after N minutes. Talk later.
-- **Repo public** — required for free Pages; user will make it public.
 - **`.local` names** — not every device resolves them (some Android phones); the IP on
   the OLED and the setup page is the fallback.
 - **Range** — C3 Super Mini antennas are often weak; measure on the car.
