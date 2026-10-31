@@ -13,6 +13,7 @@ static uint8_t scratch[DISP_FRAME_BYTES];
 void displayBegin() {
   u8g2.setI2CAddress(OLED_ADDR << 1);   // U8g2 wants the 8-bit form
   u8g2.begin();
+  u8g2.getU8x8()->x_offset = 0;   // 128-col RAM: offset 2 wrapped the right edge onto the left
 }
 
 void displayFrame(const uint8_t *frame) {
