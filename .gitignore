@@ -14,3 +14,6 @@ gifs/
 
 # host test binary
 test/motion_test
+
+# WiFi credentials for WIFI_ENABLED builds
+wifi_secrets.h

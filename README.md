@@ -77,9 +77,15 @@ library **U8g2**):
 
 ```text
 cd ~/sang/esp32
-arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc emocar
-arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc -p /dev/ttyACM0 emocar
+arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc -u -p /dev/ttyACM0 emocar
 ```
+
+Compile and upload in one command: a separate `arduino-cli upload` flashes the old binary
+in `emocar/build/` when that folder exists.
+
+WiFi (in progress, see PLANS.md): copy `wifi_secrets.example.h` to `wifi_secrets.h`, fill
+it in, and add `--build-property "compiler.cpp.extra_flags=-DWIFI_ENABLED=1"` to the
+compile line. The car shows its IP on the OLED after it joins.
 
 From a release `.bin`:
 

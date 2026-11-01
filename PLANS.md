@@ -283,7 +283,7 @@ Android phone and a PC.
 
 **Needs:** nothing — A1 is the first step of the whole plan.
 
-1. [ ] Join a hard-coded home WiFi (on at boot, no button yet); IP on the OLED → ping it
+1. [x] Join a hard-coded home WiFi (on at boot, no button yet); IP on the OLED → ping it
 2. [ ] Hotspot `emocar-XXXX` + setup page + `/scan` + `/save` → a phone joins by the QR
 3. [ ] Saved WiFi rejoins after a reboot; the setup page says why a join failed
 

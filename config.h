@@ -48,6 +48,14 @@
 #define TELEMETRY_MS     40
 #define TELEM_LEASE_MAX_S 60    // longest lease the car accepts
 
+// ---------- WiFi (PLANS.md, in progress) ----------
+// 1 = join the WiFi in wifi_secrets.h at boot (copy wifi_secrets.example.h). Keep 0 in
+// releases: WiFi on costs ~80-100 mA until the WiFi button exists.
+#ifndef WIFI_ENABLED
+#define WIFI_ENABLED     0
+#endif
+#define WIFI_IP_SHOW_MS  5000   // how long the IP stays on the OLED after a join
+
 // ---------- gyro sampling ----------
 #define SAMPLE_US   5000      // 10000, 5000, 2500 or 1250 (the gyro's own ODR)
 #define GYRO_FS_DPS 2000      // full scale: 250, 500 or 2000
