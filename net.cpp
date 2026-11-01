@@ -5,12 +5,13 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <Preferences.h>
 #include "net.h"
 #include "anim.h"
 #include "motion.h"
 #include "setup_page.h"
 
-enum Mode { SETUP, ONLINE };
+enum Mode { JOINING, SETUP, ONLINE };
 enum Join { J_IDLE, J_TRYING, J_OK, J_FAIL };
 
 static WebServer server(80);
@@ -19,7 +20,7 @@ static DNSServer dns;
 static char host[16];
 static Mode mode = SETUP;
 static Join join = J_IDLE;
-static String trySsid;
+static String trySsid, tryPass;
 static const char *failWhy = "";
 static uint32_t joinStart, doneAt;
 static bool online, stationSeen;
@@ -70,6 +71,7 @@ static void handleSave() {
   else if (join == J_TRYING) bad = "Still trying the last one, wait a moment";
   if (bad) { server.send(400, "application/json", String("{\"error\":\"") + bad + "\"}"); return; }
   trySsid = ssid;
+  tryPass = pass;
   failWhy = "";
   join = J_TRYING;
   joinStart = millis();
@@ -97,14 +99,25 @@ static void handleOther() {
   server.send(302, "text/plain", "");
 }
 
-void netBegin() {
-  uint64_t mac = ESP.getEfuseMac();
-  snprintf(host, sizeof host, "emocar-%02x%02x",
-           (unsigned)(mac >> 32) & 0xff, (unsigned)(mac >> 40) & 0xff);
-  WiFi.persistent(false);
+static bool loadSaved(String &ssid, String &pass) {
+  Preferences p;
+  p.begin("wifi", true);
+  ssid = p.getString("ssid", "");
+  pass = p.getString("pass", "");
+  p.end();
+  return ssid.length() > 0;
+}
 
+static void save(const String &ssid, const String &pass) {
+  Preferences p;
+  p.begin("wifi", false);
+  p.putString("ssid", ssid);
+  p.putString("pass", pass);
+  p.end();
+}
+
+static void startSetup() {
   WiFi.mode(WIFI_AP_STA);
-  WiFi.setHostname(host);
   WiFi.softAP(host, WIFI_AP_PASS);
   const IPAddress ap(192, 168, 4, 1);
   WiFi.softAPConfig(ap, ap, IPAddress(255, 255, 255, 0), IPAddress(0, 0, 0, 0), ap);
@@ -124,6 +137,32 @@ void netBegin() {
   showMsg("SCAN QR", host, "", millis());
 }
 
+void netBegin() {
+  uint64_t mac = ESP.getEfuseMac();
+  snprintf(host, sizeof host, "emocar-%02x%02x",
+           (unsigned)(mac >> 32) & 0xff, (unsigned)(mac >> 40) & 0xff);
+  WiFi.persistent(false);
+  WiFi.setHostname(host);
+
+  String ssid, pass;
+  if (!loadSaved(ssid, pass)) { startSetup(); return; }
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  joinStart = millis();
+  mode = JOINING;
+}
+
+static void tickJoining(uint32_t now) {
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setAutoReconnect(true);
+    mode = ONLINE;
+  } else if (now - joinStart > WIFI_JOIN_MS) {
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect();
+    startSetup();
+  }
+}
+
 static void tickSetup(uint32_t now) {
   dns.processNextRequest();
   if (!stationSeen && WiFi.softAPgetStationNum() > 0) {
@@ -135,6 +174,8 @@ static void tickSetup(uint32_t now) {
     wl_status_t s = WiFi.status();
     bool gaveUp = now - joinStart > 3000 && (s == WL_NO_SSID_AVAIL || s == WL_CONNECT_FAILED);
     if (s == WL_CONNECTED) {
+      save(trySsid, tryPass);
+      tryPass = "";
       join = J_OK;
       doneAt = now;
     } else if (gaveUp || now - joinStart > WIFI_JOIN_MS) {
@@ -162,9 +203,10 @@ static void tickOnline(uint32_t now) {
 }
 
 void netTick(uint32_t now) {
-  if (mode == SETUP) tickSetup(now);
+  if (mode == JOINING) tickJoining(now);
+  else if (mode == SETUP) tickSetup(now);
   else tickOnline(now);
-  server.handleClient();
+  if (mode == SETUP) server.handleClient();
   if (msgShownAt && now - msgShownAt >= WIFI_IP_SHOW_MS) {
     msgShownAt = 0;
     animShow(motionGet().state);

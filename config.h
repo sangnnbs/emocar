@@ -57,7 +57,7 @@
 #define WIFI_ENABLED     0
 #endif
 #define WIFI_AP_PASS     "emocar-setup" // every car's printed QR holds it: never change
-#define WIFI_JOIN_MS     15000  // give up on a WiFi typed on the setup page after this
+#define WIFI_JOIN_MS     15000  // give up on a WiFi (saved, or typed on the setup page) after this
 #define WIFI_DONE_MS     5000   // hotspot stays up this long so the page can show the IP
 #define WIFI_IP_SHOW_MS  5000   // how long a WiFi message stays on the OLED
 
