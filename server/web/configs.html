@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>emocar configs</title>
+<script src="/i18n.js"></script>
 <style>
   :root {
     --bg: #101216; --panel: #191c22; --edge: #2a2e37; --text: #d6dae2;
@@ -115,6 +116,7 @@
     <h1>emocar <span>· state conditions</span></h1>
     <div><span class="dot" id="dot"></span><span id="cartext">connecting…</span></div>
     <nav><a href="/">Animations</a><a href="/dashboard">Dashboard</a></nav>
+    <span id="lang"></span>
   </header>
 
   <div class="bar">
@@ -193,7 +195,7 @@ const FIELDS = {
   fast: [
     ['FAST_ENTER_RMS', 'Enter RMS', 'dps'],
     ['FAST_EXIT_RMS', 'Exit RMS', 'dps'],
-    ['FAST_HOLD_MS', 'Hold', 'ms'],
+    ['FAST_HOLD_MS', 'Vibrate at least', 'ms'],
   ],
   shake: [
     ['SHAKE_DPS', 'Swing line', 'dps'],
@@ -203,9 +205,9 @@ const FIELDS = {
   ],
   spin: [
     ['SPIN_GZ_DPS', 'Spin rate', 'dps'],
-    ['SPIN_HOLD_MS', 'Hold', 'ms'],
+    ['SPIN_HOLD_MS', 'Spin at least', 'ms'],
     ['SPIN_DIP_MS', 'Allowed dip', 'ms'],
-    ['DIZZY_AFTER_MS', 'Show after', 'ms'],
+    ['DIZZY_AFTER_MS', 'Keep DIZZY after', 'ms'],
   ],
   hand: [
     ['HAND_TILT_DEG', 'Tilt', '°'],
@@ -231,7 +233,7 @@ const TIPS = {
 
   FAST_ENTER_RMS: ['Enter RMS', 'Vibration level the car must pass to count as driving — the RMS of the turn rate on all 3 axes over the last 250 ms, in °/s. On a desk at rest ≈ 0.5. On soft floors (carpet, bed) lower it toward 3.0.'],
   FAST_EXIT_RMS: ['Exit RMS', 'Vibration below this ends FAST. Must be lower than Enter RMS: the gap between them stops the face flickering when vibration hovers around one value.'],
-  FAST_HOLD_MS: ['Hold', 'Vibration must stay above Enter RMS this long before FAST starts. A tap spikes vibration but never lasts, so this filters taps out.'],
+  FAST_HOLD_MS: ['Vibrate at least', 'Vibration must stay above Enter RMS this long before FAST starts. A tap spikes vibration but never lasts, so this filters taps out.'],
 
   SHAKE_DPS: ['Swing line', 'A “swing” = the car turning faster than ± this on one axis. A hard shake goes far past 400 °/s; picking the car up rarely does. Lower = DIZZY triggers more easily.'],
   SHAKE_REARM_DPS: ['Re-arm below', 'After a swing, that axis must slow below this before the same direction can count again — so one long swing isn\'t counted many times. Must be lower than Swing line.'],
@@ -239,9 +241,9 @@ const TIPS = {
   SHAKE_WINDOW_MS: ['Window', 'Swings older than this stop counting. Longer = a slower shake still triggers DIZZY.'],
 
   SPIN_GZ_DPS: ['Spin rate', 'Turn rate on the flat (gz, yaw) the car must hold in one direction — the car driving in circles. Reversing direction starts over. Not yet measured on the car.'],
-  SPIN_HOLD_MS: ['Hold', 'How long the spin must last before DIZZY. 5000 = five seconds of circling.'],
+  SPIN_HOLD_MS: ['Spin at least', 'How long the spin must last before DIZZY. 5000 = five seconds of circling.'],
   SPIN_DIP_MS: ['Allowed dip', 'Short drops below Spin rate (a bump, wheel slip) don\'t break the spin if they are shorter than this. Longer drops end it.'],
-  DIZZY_AFTER_MS: ['Show after', 'How long DIZZY keeps showing after the last swing or the end of the spin. Includes Exit hold, so it can\'t be shorter than Exit hold.'],
+  DIZZY_AFTER_MS: ['Keep DIZZY after', 'How long DIZZY keeps showing after the last swing or the end of the spin. Includes Exit hold, so it can\'t be shorter than Exit hold.'],
 
   HAND_TILT_DEG: ['Tilt', 'A car on its wheels can\'t roll sideways; a hand always tilts it. Roll (gy) is added up in both directions, and this many degrees means “in a hand”. Lower = HAPPY triggers more easily, but bumps may count.'],
   HAND_TILT_MS: ['Tilt window', 'The roll must add up to Tilt within this time, otherwise the count restarts.'],
@@ -267,7 +269,7 @@ for (const [card, list] of Object.entries(FIELDS)) {
   const box = document.querySelector(`[data-fields="${card}"]`);
   for (const [k, label, unit] of list) {
     box.insertAdjacentHTML('beforeend',
-      `<div class="row"><label for="${k}">${label}</label>
+      `<div class="row"><label for="${k}">${tr(label)}</label>
        <input id="${k}" data-key="${k}" type="number" step="any">
        <span class="unit">${unit}</span><span class="info" tabindex="0" data-tip="${k}">i</span></div>`);
   }
@@ -280,12 +282,12 @@ tip.id = 'tip';
 document.body.appendChild(tip);
 function showTip(el) {
   const k = el.dataset.tip;
-  const [title, text] = TIPS[k] || [k, ''];
-  const show = v => k.startsWith('STATE_') ? (v ? 'on' : 'off') : v;
+  const [title, text] = (TIPS[k] || [k, '']).map(s => tr(s));
+  const show = v => k.startsWith('STATE_') ? tr(v ? 'on' : 'off') : v;
   let small = '';
   if (DEF && k in DEF) {
-    const now = car[k] !== DEF[k] ? ` · on car ${show(car[k])}` : '';
-    small = `<small>sketch default ${show(DEF[k])}${now} · config.h ${k}</small>`;
+    const now = car[k] !== DEF[k] ? tr(' · on car {v}', { v: show(car[k]) }) : '';
+    small = `<small>${tr('sketch default {v}', { v: show(DEF[k]) })}${now} · config.h ${k}</small>`;
   }
   tip.innerHTML = `<b>${title}</b>${text}${small}`;
   const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
@@ -321,17 +323,19 @@ function load(card, from) {
 function problems() {
   const v = k => parseFloat($(k).value);
   const p = {};
-  if (!(v('FAST_EXIT_RMS') < v('FAST_ENTER_RMS'))) p.FAST_EXIT_RMS = `must be below Enter RMS (${v('FAST_ENTER_RMS')})`;
-  if (!(v('SHAKE_REARM_DPS') < v('SHAKE_DPS'))) p.SHAKE_REARM_DPS = `must be below Swing line (${v('SHAKE_DPS')})`;
-  if (!(v('DIZZY_AFTER_MS') >= v('EXIT_HOLD_MS'))) p.DIZZY_AFTER_MS = `must be ≥ Exit hold (${v('EXIT_HOLD_MS')})`;
+  const below = (name, k) => tr('must be below {name} ({v})', { name: tr(name), v: v(k) });
+  if (!(v('FAST_EXIT_RMS') < v('FAST_ENTER_RMS'))) p.FAST_EXIT_RMS = below('Enter RMS', 'FAST_ENTER_RMS');
+  if (!(v('SHAKE_REARM_DPS') < v('SHAKE_DPS'))) p.SHAKE_REARM_DPS = below('Swing line', 'SHAKE_DPS');
+  if (!(v('DIZZY_AFTER_MS') >= v('EXIT_HOLD_MS')))
+    p.DIZZY_AFTER_MS = tr('must be ≥ {name} ({v})', { name: tr('Exit hold'), v: v('EXIT_HOLD_MS') });
   for (const el of document.querySelectorAll('input[type=number]'))
-    if (!(el.value !== '' && parseFloat(el.value) >= 0)) p[el.dataset.key] = 'needs a number ≥ 0';
+    if (!(el.value !== '' && parseFloat(el.value) >= 0)) p[el.dataset.key] = tr('needs a number ≥ 0');
   return p;
 }
 
 function refresh() {
   const ready = !!(online && car);
-  for (const el of document.querySelectorAll('[data-key], button')) el.disabled = !ready;
+  for (const el of document.querySelectorAll('[data-key], .bar button, .card button')) el.disabled = !ready;
   $('export').disabled = !ready || !exportOK;
   if (!ready) return;
   const bad = problems();
@@ -357,7 +361,7 @@ function refresh() {
       card.querySelector('.offnote').style.display = car[st] ? 'none' : '';
     }
   }
-  $('differ').textContent = differ ? `${differ} differ from sketch` : 'matches sketch';
+  $('differ').textContent = differ ? tr('{n} differ from sketch', { n: differ }) : tr('matches sketch');
   $('differ').style.color = differ ? 'var(--accent)' : 'var(--ok)';
   $('sneed').textContent = car.SHAKE_SWINGS; $('swin').textContent = car.SHAKE_WINDOW_MS;
   $('lspinneed').textContent = car.SPIN_HOLD_MS; $('ltilt').textContent = car.HAND_TILT_DEG;
@@ -373,10 +377,10 @@ function took(r) {                  // a /api/car/config answer
   online = !!r.online;
   if (r.export) {
     exportOK = r.export.ok;
-    $('export').title = r.export.ok ? `Rewrite the #define lines in ${r.export.path}` : r.export.error;
+    $('export').title = r.export.ok ? tr('Rewrite the #define lines in {path}', { path: r.export.path }) : r.export.error;
   }
   if (r.config) { car = r.config.cur; DEF = r.config.def; }
-  $('saved').textContent = online && car ? '✓ saved on car' : '';
+  $('saved').textContent = online && car ? tr('✓ saved on car') : '';
 }
 
 async function api(path, body) {
@@ -393,11 +397,11 @@ async function fetchConfig() {
     const r = await api('/api/car/config');
     const was = !!car;
     took(r);
-    if (!online) { msg(r.error || 'car not connected', 'bad'); }
+    if (!online) { msg(r.error || tr('car not connected'), 'bad'); }
     else if (!was) { for (const c of document.querySelectorAll('.card')) load(c.dataset.card, car); msg(''); }
   } catch (e) {
     online = false;
-    msg('server not reachable — ' + e.message, 'bad');
+    msg(tr('server not reachable — ') + e.message, 'bad');
   }
   refresh();
 }
@@ -408,19 +412,19 @@ for (const card of document.querySelectorAll('.card')) {
     const set = {};
     for (const el of inputs(name)) if (valueOf(el) !== car[el.dataset.key]) set[el.dataset.key] = valueOf(el);
     const keys = Object.keys(set);
-    if (!keys.length) { msg('nothing changed'); return; }
+    if (!keys.length) { msg(tr('nothing changed')); return; }
     try {
       took(await api('/api/car/config', { set }));
       load(name, car);
-      msg(`applied ${keys.join(', ')} — saved on car`, 'good');
+      msg(tr('applied {keys} — saved on car', { keys: keys.join(', ') }), 'good');
     } catch (e) {
-      msg('not applied: ' + e.message, 'bad');
+      msg(tr('not applied: ') + e.message, 'bad');
     }
     refresh();
   };
   card.querySelector('.reset').onclick = () => {
     load(name, DEF);
-    msg('sketch defaults filled in — Apply to send them');
+    msg(tr('sketch defaults filled in — Apply to send them'));
     refresh();
   };
 }
@@ -431,9 +435,9 @@ $('resetAll').onclick = async () => {
   try {
     took(await api('/api/car/config', { reset: true }));
     for (const c of document.querySelectorAll('.card')) load(c.dataset.card, car);
-    msg('every setting back to the sketch defaults', 'good');
+    msg(tr('every setting back to the sketch defaults'), 'good');
   } catch (e) {
-    msg('reset failed: ' + e.message, 'bad');
+    msg(tr('reset failed: ') + e.message, 'bad');
   }
   refresh();
 };
@@ -442,10 +446,11 @@ $('export').onclick = async () => {
   try {
     const r = await api('/api/car/config/export', {});
     msg(r.changed && r.changed.length
-      ? `config.h: ${r.changed.length} line(s) rewritten (${r.changed.join(', ')}) — flash the sketch to make them the defaults`
-      : 'config.h already matches the car', 'good');
+      ? tr('config.h: {n} line(s) rewritten ({list}) — flash the sketch to make them the defaults',
+           { n: r.changed.length, list: r.changed.join(', ') })
+      : tr('config.h already matches the car'), 'good');
   } catch (e) {
-    msg('export failed: ' + e.message, 'bad');
+    msg(tr('export failed: ') + e.message, 'bad');
   }
 };
 
@@ -463,7 +468,7 @@ function onT(line) {
   $('lgz').textContent = (+f[3]).toFixed(0);
   $('lspin').textContent = spin;
   if (car) $('mspin').style.width = Math.min(100, spin / Math.max(car.SPIN_HOLD_MS, 1) * 100) + '%';
-  $('lctx').textContent = f[11] === 'H' ? 'HAND' : 'FLOOR';
+  $('lctx').textContent = tr(f[11] === 'H' ? 'HAND' : 'FLOOR');
   $('lroll').textContent = roll.toFixed(0);
 }
 
@@ -473,13 +478,13 @@ es.addEventListener('link', e => {
   const l = JSON.parse(e.data);
   const back = l.online && !online;
   $('dot').className = 'dot' + (l.online ? ' on' : '');
-  $('cartext').textContent = l.online ? `connected ${l.port}` : (l.error || 'offline');
+  $('cartext').textContent = l.online ? tr('connected {port}', { port: l.port }) : (l.error || tr('offline'));
   if (!l.online) { online = false; car = null; $('saved').textContent = ''; $('state').textContent = '–'; refresh(); }
   if (back) fetchConfig();          // plugged back in, or rebooted: show what it runs now
 });
 es.onerror = () => {
   $('dot').className = 'dot';
-  $('cartext').textContent = 'server not reachable — retrying';
+  $('cartext').textContent = tr('server not reachable — retrying');
 };
 
 fetchConfig();

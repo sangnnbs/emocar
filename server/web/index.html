@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>emocar</title>
+<script src="/i18n.js"></script>
 <style>
   :root {
     --bg: #101216; --panel: #191c22; --edge: #2a2e37; --text: #d6dae2;
@@ -77,7 +78,7 @@
 </head>
 <body>
 <main>
-  <h1>emocar</h1>
+  <div style="display:flex;align-items:center"><h1>emocar</h1><span id="lang" style="margin-left:auto"></span></div>
   <div id="carline"><span id="dot"></span><span id="cartext">looking for the car…</span>
     · <a href="/dashboard" style="color:var(--accent)">Sensor dashboard →</a>
     · <a href="/configs" style="color:var(--accent)">State conditions →</a></div>
@@ -161,7 +162,7 @@ function applyBadges() {
     if (on.length) {
       const span = document.createElement('span');
       span.className = 'onstate';
-      span.textContent = ` · on ${on.map(i => STATES[i].name).join(' + ')}`;
+      span.textContent = ' · ' + tr('on {states}', { states: on.map(i => STATES[i].name).join(' + ') });
       el.querySelector('.name').appendChild(span);
     }
   }
@@ -195,7 +196,7 @@ function setProfile(id, pinned) {
 }
 function updateProfileWarn() {
   $('profwarn').textContent = (carProfileId && profile && carProfileId !== profile.id)
-    ? `car has ${carProfileId} — pushes will be refused` : '';
+    ? tr('car has {id} — pushes will be refused', { id: carProfileId }) : '';
 }
 async function loadProfiles() {
   PROFILES = await (await fetch('/api/profiles')).json();
@@ -211,7 +212,7 @@ function buildCards() {
   $('states').innerHTML = STATES.map((s, i) => `
     <div class="card" id="card${i}">
       <h3>${s.emoji} ${s.name}</h3>
-      <div class="oled" id="slot${i}">placeholder</div>
+      <div class="oled" id="slot${i}">${tr('placeholder')}</div>
       <div class="tag" id="tag${i}">–</div>
     </div>`).join('');
   STATES.forEach((_, i) => $('card' + i).onclick = () => selectState(i));
@@ -224,7 +225,7 @@ function selectState(i) {
 function refreshSlot(i) {
   const img = new Image();
   img.onload  = () => { const s = $('slot' + i); s.textContent = ''; s.appendChild(img); };
-  img.onerror = () => { $('slot' + i).textContent = 'placeholder'; };
+  img.onerror = () => { $('slot' + i).textContent = tr('placeholder'); };
   img.src = `/api/car/preview/${i}?ts=${Date.now()}`;
 }
 
@@ -240,21 +241,23 @@ async function poll() {
         setProfile(carProfileId, false);          // follow the car's display
       updateProfileWarn();
       $('cartext').textContent =
-        `online on ${r.port} — state ${st.state}, heap ${(st.heap / 1024) | 0} KB, up ${st.uptime}s` +
-        (st.profile ? `, display ${st.profile}` : '');
+        tr('online on {port} — state {state}, heap {heap} KB, up {up}s',
+           { port: r.port, state: st.state, heap: (st.heap / 1024) | 0, up: st.uptime }) +
+        (st.profile ? tr(', display {profile}', { profile: st.profile }) : '');
       STATES.forEach((s, i) => {
         const sl = st.slots[i];
         const a = ASSIGN[i];
         const who = sl.file && a && a.bytes === sl.bytes ? `${a.name} · ` : '';
-        $('tag' + i).textContent = sl.file ? `${who}${sl.frames} frames · ${(sl.bytes/1024).toFixed(1)} KB`
-                                           : 'placeholder';
+        $('tag' + i).textContent = sl.file
+          ? who + tr('{frames} frames · {kb} KB', { frames: sl.frames, kb: (sl.bytes / 1024).toFixed(1) })
+          : tr('placeholder');
         $('card' + i).classList.toggle('live', st.state === s.name.toLowerCase());
       });
     } else {
-      $('cartext').textContent = 'offline — ' + (r.error || 'plug the car in over USB');
+      $('cartext').textContent = tr('offline — ') + (r.error || tr('plug the car in over USB'));
     }
     return r.online;
-  } catch { $('dot').classList.remove('on'); $('cartext').textContent = 'server error'; return false; }
+  } catch { $('dot').classList.remove('on'); $('cartext').textContent = tr('server error'); return false; }
 }
 
 // ---------------- library ----------------
@@ -294,9 +297,11 @@ function openTune(name, kind) {
   // gif is already on a different state
   const cur = ASSIGN[selState];
   const elsewhere = statesOf(name).filter(i => i !== selState);
-  let info = `${STATES[selState].name} now has: ${cur ? cur.name : 'placeholder / unknown'}`;
+  let info = tr('{state} now has: {name}',
+                { state: STATES[selState].name, name: cur ? cur.name : tr('placeholder / unknown') });
   if (elsewhere.length)
-    info += ` — <span class="warn">⚠ ${name} is already on ${elsewhere.map(i => STATES[i].name).join(' + ')}</span>`;
+    info += ` — <span class="warn">${tr('⚠ {name} is already on {states}',
+      { name, states: elsewhere.map(i => STATES[i].name).join(' + ') })}</span>`;
   $('tinfo').innerHTML = info;
   $('msg').textContent = ''; $('msg').className = '';
   $('timg').src = tuneURL();
@@ -359,7 +364,7 @@ $('tune').onclick = e => { if (e.target === $('tune')) $('tune').classList.remov
 
 $('apply').onclick = async () => {
   $('apply').disabled = true;
-  $('msg').textContent = 'converting + sending…'; $('msg').className = '';
+  $('msg').textContent = tr('converting + sending…'); $('msg').className = '';
   try {
     const r = await fetch('/api/assign', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -373,9 +378,10 @@ $('apply').onclick = async () => {
       await loadAssignments();
       refreshSlot(selState); poll();
       openTune(tuneName, tuneKind);          // refresh the "now has" line + warning
-      $('msg').textContent = `on the car — ${j.frames} frames, ${(j.bytes / 1024).toFixed(1)} KB`;
+      $('msg').textContent = tr('on the car — {frames} frames, {kb} KB',
+                                 { frames: j.frames, kb: (j.bytes / 1024).toFixed(1) });
       $('msg').className = 'ok';
-    } else { $('msg').textContent = j.error || 'failed'; $('msg').className = 'bad'; }
+    } else { $('msg').textContent = j.error || tr('failed'); $('msg').className = 'bad'; }
   } catch (e) { $('msg').textContent = e.message; $('msg').className = 'bad'; }
   $('apply').disabled = false;
 };
@@ -389,7 +395,7 @@ $('upfile').onchange = async () => {
   const r = await fetch('/api/upload', { method: 'POST', body: fd });
   const j = await r.json();
   if (j.ok) loadLibrary();
-  else alert(j.error || 'upload failed');
+  else alert(j.error || tr('upload failed'));
   $('upfile').value = '';
 };
 

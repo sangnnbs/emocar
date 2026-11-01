@@ -32,6 +32,9 @@ var dashboardHTML []byte
 //go:embed web/configs.html
 var configsHTML []byte
 
+//go:embed web/i18n.js
+var i18nJS []byte
+
 var (
 	car        *carLink
 	libDirs    []string
@@ -429,6 +432,10 @@ func main() {
 	http.HandleFunc("/configs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(configsHTML)
+	})
+	http.HandleFunc("/i18n.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(i18nJS)
 	})
 	http.HandleFunc("/api/car/config", handleConfig)
 	http.HandleFunc("/api/car/config/export", handleConfigExport)

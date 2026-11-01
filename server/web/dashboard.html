@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>emocar sensor</title>
+<script src="/i18n.js"></script>
 <style>
   :root {
     --bg: #101216; --panel: #191c22; --edge: #2a2e37; --text: #d6dae2;
@@ -89,6 +90,7 @@
     <div id="carline"><span class="dot" id="dot"></span><span id="cartext">connecting…</span></div>
     <a href="/">← Animations</a>
     <a href="/configs" style="margin-left:0">State conditions</a>
+    <span id="lang"></span>
   </header>
 
   <div class="bar">
@@ -208,12 +210,12 @@ function connect() {
     const l = JSON.parse(e.data);
     online = l.online;
     $('dot').className = 'dot' + (l.online ? ' on' : '');
-    $('cartext').textContent = l.online ? `connected ${l.port}` : (l.error || 'offline');
+    $('cartext').textContent = l.online ? tr('connected {port}', { port: l.port }) : (l.error || tr('offline'));
   });
   es.onerror = () => {
     online = false;
     $('dot').className = 'dot';
-    $('cartext').textContent = 'server not reachable — retrying';
+    $('cartext').textContent = tr('server not reachable — retrying');
   };
 }
 
@@ -328,7 +330,7 @@ function drawChart(cv, data, series, lo, hi, strips) {
   }
   g.textAlign = 'center';
   for (let s = 0; s <= win / 1000; s += win > 10000 ? 5 : 1)
-    g.fillText(s ? `-${s}s` : 'now', X(end - s * 1000), H - 9);
+    g.fillText(s ? `-${s}s` : tr('now'), X(end - s * 1000), H - 9);
 
   const vis = data.filter(d => d.ms >= start);
   for (const { key, color } of series) {
@@ -371,8 +373,8 @@ $('rates').innerHTML = AXES.map(([k, n]) => `
 
 // Looking down the + end of the axis: right-hand rule, + = counter-clockwise.
 function dirText(v) {
-  if (Math.abs(v) < 3) return '<span style="color:var(--dim)">still</span>';
-  return v > 0 ? '↺ CCW' : '↻ CW';
+  if (Math.abs(v) < 3) return `<span style="color:var(--dim)">${tr('still')}</span>`;
+  return tr(v > 0 ? '↺ CCW' : '↻ CW');
 }
 
 function render() {
@@ -380,14 +382,14 @@ function render() {
   const stale = online && !paused && performance.now() - lastAt > STALE_MS;
   $('livedot').className = 'dot' + (paused ? ' paused' : stale || !hist.length ? '' : ' on');
   $('warn').textContent = !online ? '' : stale
-    ? 'car connected but sends no telemetry — it may be rebooting (a few seconds), or its firmware predates TELEM / has the gyro off' : '';
+    ? tr('car connected but sends no telemetry — it may be rebooting (a few seconds), or its firmware predates TELEM / has the gyro off') : '';
   if (!dirty) return;
   dirty = false;
 
   const n = hist.length, recent = n ? hist.filter(d => d.ms > hist[n - 1].ms - 2000).length : 0;
-  $('livetext').textContent = paused ? 'PAUSED — data still arriving'
-    : n > 1 ? `LIVE ${Math.round(recent / 2)} Hz` : 'waiting';
-  $('pause').textContent = paused ? 'Resume' : 'Pause';
+  $('livetext').textContent = paused ? tr('PAUSED — data still arriving')
+    : n > 1 ? tr('LIVE {hz} Hz', { hz: Math.round(recent / 2) }) : tr('waiting');
+  $('pause').textContent = tr(paused ? 'Resume' : 'Pause');
   $('pause').className = paused ? 'on' : '';
   if (!view.length) return;
 
@@ -405,7 +407,7 @@ function render() {
   const t = age(s) ? ` @ ${age(s).toFixed(2)} s` : '';
   $('gread').textContent = `gx ${f1(s.gx)}  gy ${f1(s.gy)}  gz ${f1(s.gz)} dps${t}`;
   $('mread').textContent = `rms ${s.rms.toFixed(1)}  jitter ${s.jitter.toFixed(2)}  roll ${s.roll.toFixed(1)}°  ` +
-    `${s.hand ? 'HAND' : 'floor'}  swings ${s.swings.join('/')}  spin ${s.spin.toFixed(1)}s  ${s.state}${t}`;
+    `${tr(s.hand ? 'HAND' : 'floor')}  swings ${s.swings.join('/')}  spin ${s.spin.toFixed(1)}s  ${s.state}${t}`;
 
   for (const [k] of AXES) {
     const v = s[k], w = Math.min(1, Math.abs(v) / range) * 50;
@@ -419,13 +421,14 @@ function render() {
   $('aroll').textContent = f1(e.roll) + '°';
   $('ayaw').textContent = f1(e.yaw) + '°';
   const [dk, dn] = AXES.reduce((a, b) => Math.abs(s[b[0]]) > Math.abs(s[a[0]]) ? b : a);
-  $('turn').innerHTML = Math.abs(s[dk]) < 3 ? 'not turning'
-    : `turning <b>${dirText(s[dk])}</b> about ${dk[1].toUpperCase()} (${dn}) at <b>${Math.abs(s[dk]).toFixed(0)}°/s</b>`;
+  $('turn').innerHTML = Math.abs(s[dk]) < 3 ? tr('not turning')
+    : tr('turning <b>{dir}</b> about {axis} ({name}) at <b>{v}°/s</b>',
+         { dir: dirText(s[dk]), axis: dk[1].toUpperCase(), name: dn, v: Math.abs(s[dk]).toFixed(0) });
   drawCube(R);
 
   $('state').textContent = s.state;
   $('state').style.borderColor = $('state').style.color = STATE_COLOR[s.state] || '';
-  $('ctx').textContent = s.hand ? 'in a HAND' : 'on the floor';
+  $('ctx').textContent = tr(s.hand ? 'in a HAND' : 'on the floor');
   $('srms').textContent = s.rms.toFixed(1);
   $('sjit').textContent = s.jitter.toFixed(2);
   $('sroll').textContent = s.roll.toFixed(1);
@@ -446,11 +449,11 @@ addEventListener('keydown', e => {
 });
 
 $('zero').onclick = async () => {
-  $('msg').textContent = 'zeroing…';
+  $('msg').textContent = tr('zeroing…');
   try {
     const r = await (await fetch('/api/car/zero', { method: 'POST' })).json();
-    $('msg').textContent = r.ok ? 'zeroed' : r.error;
-  } catch { $('msg').textContent = 'server not reachable'; }
+    $('msg').textContent = r.ok ? tr('zeroed') : r.error;
+  } catch { $('msg').textContent = tr('server not reachable'); }
   setTimeout(() => { $('msg').textContent = ''; }, 3000);
 };
 
