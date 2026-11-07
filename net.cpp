@@ -126,6 +126,49 @@ static void handleAnim() {
   else server.send(404, "text/plain", "no animation");
 }
 
+static File upFile;
+static char upErr[96];
+
+static bool isMultipart() { return server.header("Content-Type").startsWith("multipart/"); }
+
+// The body arrives in HTTP_RAW_BUFLEN pieces, each written to ANIM_TMP_PATH at once.
+static void animBody() {
+  if (isMultipart()) return;
+  HTTPRaw &r = server.raw();
+  if (r.status == RAW_START) {
+    upErr[0] = 0;
+    int slot = animSlotArg();
+    if (slot < 0) { snprintf(upErr, sizeof upErr, "bad slot"); return; }
+    if (!animUploadLenOk(server.clientContentLength())) { snprintf(upErr, sizeof upErr, "bad length"); return; }
+    animMessage("UPDATING", "receiving anim", carStateName((CarState)slot));
+    LittleFS.remove(ANIM_TMP_PATH);
+    upFile = LittleFS.open(ANIM_TMP_PATH, "w");
+    if (!upFile) snprintf(upErr, sizeof upErr, "open tmp failed");
+  } else if (r.status == RAW_WRITE) {
+    if (upErr[0] || !upFile) return;
+    if (upFile.write(r.buf, r.currentSize) != r.currentSize)
+      snprintf(upErr, sizeof upErr, "flash write failed at %u bytes", (unsigned)r.totalSize);
+  } else {
+    if (upFile) upFile.close();
+    if (r.status == RAW_ABORTED) {
+      LittleFS.remove(ANIM_TMP_PATH);
+      animShow(motionGet().state);
+    }
+  }
+}
+
+static void animPost() {
+  if (isMultipart()) { server.send(415, "text/plain", "send the .qgif as the raw body"); return; }
+  int slot = animSlotArg();
+  QgifInfo info;
+  uint32_t len = server.clientContentLength();
+  bool ok = !upErr[0] && animCommitTmp(slot, len, info, upErr, sizeof upErr);
+  if (!ok) LittleFS.remove(ANIM_TMP_PATH);
+  animShow(motionGet().state);
+  if (!ok) { server.send(400, "text/plain", upErr); return; }
+  sendJson(String("{\"frames\":") + info.frames + ",\"bytes\":" + len + "}");
+}
+
 static void handleOther() {
   if (mode != SETUP) { server.send(404, "text/plain", "Not found"); return; }
   server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
@@ -190,6 +233,9 @@ void netBegin() {
   server.on("/join", HTTP_GET, setupOnly(handleJoin));
   server.on("/status", HTTP_GET, handleStatus);
   server.on(UriBraces("/anim/{}"), HTTP_GET, handleAnim);
+  server.on(UriBraces("/anim/{}"), HTTP_POST, animPost, animBody);
+  const char *headers[] = {"Content-Type"};
+  server.collectHeaders(headers, 1);
   server.onNotFound(handleOther);
   server.begin();
 }

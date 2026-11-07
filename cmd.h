@@ -11,7 +11,7 @@
 //   CFG RESET       -> the same, back to the config.h defaults
 // A line longer than CMD_LINE_MAX is answered ERR and ignored, never cut short.
 // Replies start with OK / ERR / READY / ACK; any other line is telemetry or a debug log.
-// A PUT blocks the loop for the transfer.
+// A PUT blocks the loop for the transfer. The same slots take uploads over WiFi (net.cpp).
 #pragma once
 #include <stddef.h>
 

@@ -87,36 +87,27 @@ static bool receivePayload(long payloadLen, char *err, size_t errLen) {
     Serial.printf("ACK %ld\n", got);
   }
   f.close();
-
-  QgifInfo info; uint32_t size;
-  if (!qgifCheckFile(ANIM_TMP_PATH, info, size) || size != (uint32_t)payloadLen) {
-    snprintf(err, errLen, "not a %dx%d %s qgif", DISP_W, DISP_H, dispFormatName());
-    return false;
-  }
   return true;
 }
 
 static void handlePutAnim(int slot, long payloadLen) {
-  if (payloadLen < QGIF_HDR_MAX + 2 + DISP_FRAME_BYTES || (unsigned long)payloadLen > ANIM_MAX_BYTES) {
+  if (payloadLen < 0 || !animUploadLenOk(payloadLen)) {
     replyErr("bad length");
     return;
   }
   animMessage("UPDATING", "receiving anim", carStateName((CarState)slot));
 
   char err[96];
+  QgifInfo info;
   if (!receivePayload(payloadLen, err, sizeof err)) {
     LittleFS.remove(ANIM_TMP_PATH);
     replyErr(err);
     return;
   }
-
-  char path[24]; animSlotPath(slot, path, sizeof path);
-  LittleFS.remove(path);
-  if (!LittleFS.rename(ANIM_TMP_PATH, path)) {
-    replyErr("rename failed");
+  if (!animCommitTmp(slot, payloadLen, info, err, sizeof err)) {
+    replyErr(err);
     return;
   }
-  animReload(slot);
   Serial.printf("OK %ld\n", payloadLen);
 }
 
