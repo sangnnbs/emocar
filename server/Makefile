@@ -11,7 +11,7 @@ PORT      ?=                       # empty = let the server auto-detect the car
 
 JSON      := python3 -m json.tool
 
-.PHONY: help build run down open vet test wasm clean status assign dist
+.PHONY: help build run down open vet test wasm web clean status assign dist
 
 help:
 	@echo "build      compile ./emocar-server"
@@ -24,6 +24,8 @@ help:
 	@echo "vet        go vet"
 	@echo "test       go test (the wasm comparison needs node, else it is skipped)"
 	@echo "wasm       build qgif.wasm + wasm_exec.js for the web app into $(WASM_OUT)/"
+	@echo "web        wasm + i18n.js: everything the WiFi web app in $(WASM_OUT)/ needs"
+	@echo "           (make run serves it at /app/; open http://<car>/?app=http://<this PC>:8080/app/)"
 	@echo "clean      remove the binary and dist/"
 	@echo "dist       cross-compile release archives into dist/ [VERSION=v0.1.0]"
 
@@ -38,7 +40,7 @@ build:
 DEV_LIB     ?= ../emoji_lib,../downloads/00_Main
 DEV_UPLOADS ?= ../downloads/uploads
 run: build
-	./emocar-server -listen $(LISTEN) $(if $(PORT),-port $(PORT),) -lib $(DEV_LIB) -uploads $(DEV_UPLOADS)
+	./emocar-server -listen $(LISTEN) $(if $(PORT),-port $(PORT),) -lib $(DEV_LIB) -uploads $(DEV_UPLOADS) -app $(WASM_OUT)
 
 down:
 	@pkill -x emocar-server && echo "emocar-server stopped" || echo "emocar-server not running"
@@ -60,6 +62,10 @@ wasm:
 	GOOS=js GOARCH=wasm go build -trimpath -ldflags '-s -w' -o $(WASM_OUT)/qgif.wasm ./cmd/qgif-wasm
 	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" $(WASM_OUT)/
 	@ls -l $(WASM_OUT)/qgif.wasm $(WASM_OUT)/wasm_exec.js
+
+# The app shares the EN | VI strings with the server pages.
+web: wasm
+	cp web/i18n.js $(WASM_OUT)/
 
 clean:
 	rm -f emocar-server

@@ -296,9 +296,9 @@ Tested: Samsung A50 (Android). No captive popup on it, so the printed sticker ca
 
 **Needs:** A1 for B1–B2. B3 needs nothing (start anytime); B4 needs B1, or a mock car.
 
-1. [ ] `GET /status` (with the firmware version string), `GET /anim/<n>` → curl
-2. [ ] `POST /anim/<n>` → curl a `.qgif` made by the Go server; the car plays it
-3. [ ] `qgif.go` → WASM → its output matches the Go server's byte for byte
+1. [x] `GET /status` (with the firmware version string), `GET /anim/<n>` → curl
+2. [x] `POST /anim/<n>` → curl a `.qgif` made by the Go server; the car plays it
+3. [x] `qgif.go` → WASM → its output matches the Go server's byte for byte
 4. [ ] `web/` app (state cards, upload, editor, apply) loaded through the starter page
    → upload a GIF from a phone and a PC browser
 5. [ ] CI deploys `app/<tag>/` to Pages (repo is public); the starter page loads it
