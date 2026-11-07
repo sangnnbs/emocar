@@ -121,7 +121,7 @@ async function watch(ssid) {
   for (;;) {
     await sleep(1000);
     let j;
-    try { j = await (await fetch('/status')).json(); misses = 0; }
+    try { j = await (await fetch('/join')).json(); misses = 0; }
     catch (e) { if (++misses === 3) say(LOST, 'work'); continue; }
     if (j.state === 'ok') {
       say('Done! The car is on “' + ssid + '” (IP ' + j.ip + '). The setup hotspot closes in a few seconds ' +

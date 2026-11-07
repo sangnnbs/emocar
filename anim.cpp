@@ -167,3 +167,9 @@ bool animSlotInfo(int slot, uint16_t &frames, uint32_t &bytes) {
   frames = fsInfo[slot].frames; bytes = fsBytes[slot];
   return true;
 }
+
+bool animBuiltin(int slot, const uint8_t *&data, uint32_t &len) {
+  if (!validSlot(slot) || !pmValid[slot]) return false;
+  data = ANIM[slot].data; len = ANIM[slot].len;
+  return true;
+}

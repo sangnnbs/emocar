@@ -29,3 +29,4 @@ void animShow(CarState s);                                  // switch animation 
 void animTick();                                            // call every loop
 void animReload(int slot);                                  // revalidate a slot after an upload
 bool animSlotInfo(int slot, uint16_t &frames, uint32_t &bytes); // true if a valid file backs the slot
+bool animBuiltin(int slot, const uint8_t *&data, uint32_t &len); // the slot's PROGMEM .qgif, if valid

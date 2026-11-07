@@ -11,22 +11,27 @@
 
 static void replyErr(const char *msg) { Serial.printf("ERR %s\n", msg); }
 
-static void handleStatus() {
-  char body[560];
-  int len = snprintf(body, sizeof body,
-                     "{\"state\":\"%s\",\"heap\":%lu,\"uptime\":%lu,"
+int statusJson(char *body, size_t n) {
+  int len = snprintf(body, n,
+                     "{\"fw\":\"%s\",\"api\":%d,\"state\":\"%s\",\"heap\":%lu,\"uptime\":%lu,"
                      "\"profile\":\"%s\",\"w\":%d,\"h\":%d,\"format\":\"%s\",\"slots\":[",
-                     carStateName(motionGet().state),
+                     FW_VERSION, API_VERSION, carStateName(motionGet().state),
                      (unsigned long)ESP.getFreeHeap(), (unsigned long)(millis() / 1000),
                      DISP_PROFILE, DISP_W, DISP_H, dispFormatName());
   for (int i = 0; i < CAR_STATE_COUNT; i++) {
     uint16_t frames; uint32_t bytes;
     bool file = animSlotInfo(i, frames, bytes);
-    len += snprintf(body + len, sizeof body - len, "%s{\"file\":%s,\"frames\":%u,\"bytes\":%lu}",
+    len += snprintf(body + len, n - len, "%s{\"file\":%s,\"frames\":%u,\"bytes\":%lu}",
                     i ? "," : "", file ? "true" : "false",
                     file ? frames : 0, file ? (unsigned long)bytes : 0);
   }
-  snprintf(body + len, sizeof body - len, "]}");
+  len += snprintf(body + len, n - len, "]}");
+  return len;
+}
+
+static void handleStatus() {
+  char body[600];
+  statusJson(body, sizeof body);
   Serial.printf("OK %s\n", body);
 }
 

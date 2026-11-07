@@ -6,8 +6,11 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <LittleFS.h>
+#include <uri/UriBraces.h>
 #include "net.h"
 #include "anim.h"
+#include "cmd.h"
 #include "motion.h"
 #include "setup_page.h"
 
@@ -80,7 +83,7 @@ static void handleSave() {
   WiFi.begin(ssid.c_str(), pass.c_str());
 }
 
-static void handleStatus() {
+static void handleJoin() {
   String out = "{\"state\":\"";
   out += join == J_IDLE ? "idle" : join == J_TRYING ? "trying" : join == J_OK ? "ok" : "fail";
   out += "\",\"ssid\":\"" + jsonEscape(trySsid) + "\",\"ip\":\"";
@@ -93,10 +96,44 @@ static void handleStatus() {
   sendJson(out);
 }
 
+static void handleStatus() {
+  char body[600];
+  statusJson(body, sizeof body);
+  server.sendHeader("Cache-Control", "no-store");
+  sendJson(body);
+}
+
+static int animSlotArg() {
+  String a = server.pathArg(0);
+  int slot = a.length() == 1 ? a[0] - '0' : -1;
+  return slot >= 0 && slot < CAR_STATE_COUNT ? slot : -1;
+}
+
+static void handleAnim() {
+  int slot = animSlotArg();
+  if (slot < 0) { server.send(400, "text/plain", "bad slot"); return; }
+  server.sendHeader("Cache-Control", "no-store");
+  uint16_t frames; uint32_t bytes;
+  char path[24]; animSlotPath(slot, path, sizeof path);
+  File f;
+  if (animSlotInfo(slot, frames, bytes) && (f = LittleFS.open(path, "r"))) {
+    server.streamFile(f, "application/octet-stream");
+    f.close();
+    return;
+  }
+  const uint8_t *data; uint32_t len;
+  if (animBuiltin(slot, data, len)) server.send_P(200, "application/octet-stream", (PGM_P)data, len);
+  else server.send(404, "text/plain", "no animation");
+}
+
 static void handleOther() {
   if (mode != SETUP) { server.send(404, "text/plain", "Not found"); return; }
   server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
   server.send(302, "text/plain", "");
+}
+
+static WebServer::THandlerFunction setupOnly(void (*h)()) {
+  return [h] { if (mode == SETUP) h(); else handleOther(); };
 }
 
 static bool loadSaved(String &ssid, String &pass) {
@@ -124,13 +161,6 @@ static void startSetup() {
   WiFi.AP.enableDhcpCaptivePortal();
   dns.setErrorReplyCode(DNSReplyCode::NoError);
   dns.start(53, "*", WiFi.softAPIP());
-
-  server.on("/", HTTP_GET, [] { server.send_P(200, "text/html", SETUP_HTML); });
-  server.on("/scan", HTTP_GET, handleScan);
-  server.on("/save", HTTP_POST, handleSave);
-  server.on("/status", HTTP_GET, handleStatus);
-  server.onNotFound(handleOther);
-  server.begin();
   WiFi.scanNetworks(true);
 
   mode = SETUP;
@@ -145,11 +175,23 @@ void netBegin() {
   WiFi.setHostname(host);
 
   String ssid, pass;
-  if (!loadSaved(ssid, pass)) { startSetup(); return; }
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid.c_str(), pass.c_str());
-  joinStart = millis();
-  mode = JOINING;
+  if (loadSaved(ssid, pass)) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    joinStart = millis();
+    mode = JOINING;
+  } else {
+    startSetup();
+  }
+
+  server.on("/", HTTP_GET, setupOnly([] { server.send_P(200, "text/html", SETUP_HTML); }));
+  server.on("/scan", HTTP_GET, setupOnly(handleScan));
+  server.on("/save", HTTP_POST, setupOnly(handleSave));
+  server.on("/join", HTTP_GET, setupOnly(handleJoin));
+  server.on("/status", HTTP_GET, handleStatus);
+  server.on(UriBraces("/anim/{}"), HTTP_GET, handleAnim);
+  server.onNotFound(handleOther);
+  server.begin();
 }
 
 static void tickJoining(uint32_t now) {
@@ -206,7 +248,7 @@ void netTick(uint32_t now) {
   if (mode == JOINING) tickJoining(now);
   else if (mode == SETUP) tickSetup(now);
   else tickOnline(now);
-  if (mode == SETUP) server.handleClient();
+  server.handleClient();
   if (msgShownAt && now - msgShownAt >= WIFI_IP_SHOW_MS) {
     msgShownAt = 0;
     animShow(motionGet().state);
