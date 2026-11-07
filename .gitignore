@@ -4,6 +4,7 @@ server/emocar-server.exe
 server/dist/
 web/qgif.wasm
 web/wasm_exec.js
+web/i18n.js
 
 # personal GIF libraries and uploads — scanned at runtime, never part of the repo
 # (anim_data.h stays committed so the firmware builds without them;

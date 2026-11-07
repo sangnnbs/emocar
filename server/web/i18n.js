@@ -66,6 +66,19 @@ const VI = {
   'failed': 'thất bại',
   'upload failed': 'tải lên thất bại',
 
+  // ---------------------------------------------------------------- WiFi web app (web/)
+  '{host} — fw {fw}, state {state}': '{host} — fw {fw}, trạng thái {state}',
+  'car not answering — is it on this WiFi?': 'xe không trả lời — xe có đang cùng WiFi không?',
+  'loading the converter…': 'đang tải bộ chuyển đổi…',
+  'converter failed to load: {err}': 'không tải được bộ chuyển đổi: {err}',
+  'Tap a state to change its face': 'Chạm vào một trạng thái để đổi khuôn mặt',
+  'now on the car': 'đang trên xe',
+  'Choose GIF': 'Chọn GIF',
+  'built-in': 'ảnh có sẵn',
+  '{name} · {frames} frames · {kb} KB': '{name} · {frames} khung hình · {kb} KB',
+  'sending…': 'đang gửi…',
+  '{name} is not a GIF or .qgif': '{name} không phải GIF hoặc .qgif',
+
   // ---------------------------------------------------------------- /configs
   'emocar configs': 'emocar cấu hình',
   '· state conditions': '· điều kiện trạng thái',
@@ -241,7 +254,11 @@ function tr(s, vars) {
   return out;
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+// The server pages load this in <head>, so it runs on DOMContentLoaded. The WiFi web app
+// loads it after the page is up and calls i18nApply() itself once its DOM is built.
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => i18nApply());
+
+function i18nApply() {
   if (LANG === 'vi') {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode: n => n.parentElement.closest('script, style')
@@ -273,4 +290,4 @@ document.addEventListener('DOMContentLoaded', () => {
       location.reload();
     };
   }
-});
+}

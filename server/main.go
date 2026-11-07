@@ -407,6 +407,7 @@ func main() {
 	uploads := flag.String("uploads", gifs, "where browser uploads are stored")
 	flag.StringVar(&sketchDir, "sketch", "..", "firmware folder whose config.h /configs Export rewrites")
 	open := flag.Bool("open", true, "open the web UI in the default browser once the server is up")
+	app := flag.String("app", "", "dev: serve this folder (the WiFi web app, ../web) at /app/ for a car's ?app= override")
 	flag.Parse()
 	car = newCarLink(*port)
 	libDirs = strings.Split(*lib, ",")
@@ -451,6 +452,17 @@ func main() {
 	http.HandleFunc("/api/assign", handleAssign)
 	http.HandleFunc("/api/assignments", handleAssignments)
 	http.HandleFunc("/api/upload", handleUpload)
+	if *app != "" {
+		// The app runs on the car's origin, so its fetch of qgif.wasm is cross-origin:
+		// send the same CORS header GitHub Pages does. no-cache so a reload picks up edits.
+		files := http.StripPrefix("/app/", http.FileServer(http.Dir(*app)))
+		http.HandleFunc("/app/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Cache-Control", "no-cache")
+			files.ServeHTTP(w, r)
+		})
+		log.Printf("web app from %s at /app/", *app)
+	}
 
 	where := *port
 	if where == "" {
