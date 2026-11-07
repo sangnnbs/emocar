@@ -37,7 +37,9 @@
 // ---------- debug log ----------
 // 1 = print debug lines on serial: boot, calibration, gyro faults, state changes and a
 // gyro line every DEBUG_PRINT_MS. The server skips any line that isn't a protocol reply.
+#ifndef DEBUG_LOG
 #define DEBUG_LOG        0
+#endif
 #define DEBUG_PRINT_MS   200
 
 // ---------- telemetry ----------
@@ -47,6 +49,17 @@
 #define TELEMETRY        1
 #define TELEMETRY_MS     40
 #define TELEM_LEASE_MAX_S 60    // longest lease the car accepts
+
+// ---------- WiFi (PLANS.md, in progress) ----------
+// 1 = open the setup hotspot at boot (name emocar-xxxx from the MAC). Keep 0 in releases:
+// WiFi on costs ~80-100 mA until the WiFi button exists.
+#ifndef WIFI_ENABLED
+#define WIFI_ENABLED     0
+#endif
+#define WIFI_AP_PASS     "emocar-setup" // every car's printed QR holds it: never change
+#define WIFI_JOIN_MS     15000  // give up on a WiFi (saved, or typed on the setup page) after this
+#define WIFI_DONE_MS     5000   // hotspot stays up this long so the page can show the IP
+#define WIFI_IP_SHOW_MS  5000   // how long a WiFi message stays on the OLED
 
 // ---------- gyro sampling ----------
 #define SAMPLE_US   5000      // 10000, 5000, 2500 or 1250 (the gyro's own ODR)

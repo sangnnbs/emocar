@@ -77,9 +77,20 @@ library **U8g2**):
 
 ```text
 cd ~/sang/esp32
-arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc emocar
-arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc -p /dev/ttyACM0 emocar
+arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc -u -p /dev/ttyACM0 emocar
 ```
+
+Compile and upload in one command: a separate `arduino-cli upload` flashes the old binary
+in `emocar/build/` when that folder exists.
+
+WiFi (in progress, see PLANS.md): add
+`--build-property "compiler.cpp.extra_flags=-DWIFI_ENABLED=1"` to the compile line. The car
+opens hotspot `emocar-xxxx` (password `emocar-setup`); join it, pick the home WiFi on the
+page at `http://192.168.4.1`, and the OLED shows the car's IP. The car saves that WiFi and
+rejoins it at every boot; if it can't within 15 s, the hotspot opens again.
+
+Each car gets a printed sticker, `qr/emocar-xxxx.svg`: the QR (`WIFI:T:WPA;S:emocar-xxxx;P:emocar-setup;;`,
+made with `qrencode -t SVG -l M -m 2 --svg-path`), the name, the password and the setup address.
 
 From a release `.bin`:
 

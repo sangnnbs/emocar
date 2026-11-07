@@ -1,7 +1,7 @@
 # Plans
 
 One track: **WiFi + a web app on GitHub Pages**, so cars with no USB port can be set up,
-given new GIFs and updated from any device with a browser (phone, PC, laptop). Planned 2026-10-11; nothing built yet.
+given new GIFs and updated from any device with a browser (phone, PC, laptop). Planned 2026-10-11; feature A (WiFi setup) done 2026-11-01, B–D not started.
 
 Earlier plans (state machine v2, the GIF upload tool options) are done or dropped — the
 current firmware is what users want. They live in git history (`26690b1:PLANS.md`).
@@ -19,7 +19,7 @@ Any phone or PC with a browser, on the same home WiFi as the car.
 
 | | iPhone / iPad | Android phone | PC (Windows / macOS / Linux) |
 |---|---|---|---|
-| First setup | Camera scans the QR → setup page pops up | Camera scans the QR → setup page pops up | No camera: join `emocar-1A2B` with the password printed under the QR → setup page pops up (or open `192.168.4.1`) |
+| First setup | Camera scans the QR → open `http://192.168.4.1` (printed under the QR) | Same (no popup on a Samsung A50, tested) | No camera: join `emocar-1A2B` with the password printed under the QR → open `192.168.4.1` |
 | Open the app | `http://emocar-1a2b.local` | `.local` depends on the phone → use the IP | `.local` works on macOS, Windows 10+, most Linux desktops; IP otherwise |
 | GIFs, firmware | Safari, Chrome | Chrome, any browser | Any browser |
 
@@ -279,15 +279,18 @@ Pages are set up once, by whichever of B5 / C3 comes first. Every step ends in a
 the desk. A feature is done when its **Done** check passes on an iPhone, an
 Android phone and a PC.
 
-### A. WiFi setup
+### A. WiFi setup — done 2026-11-01 (branch `wifi-setup`)
 
 **Needs:** nothing — A1 is the first step of the whole plan.
 
-1. [ ] Join a hard-coded home WiFi (on at boot, no button yet); IP on the OLED → ping it
-2. [ ] Hotspot `emocar-XXXX` + setup page + `/scan` + `/save` → a phone joins by the QR
-3. [ ] Saved WiFi rejoins after a reboot; the setup page says why a join failed
+1. [x] Join a hard-coded home WiFi (on at boot, no button yet); IP on the OLED → ping it
+2. [x] Hotspot `emocar-XXXX` + setup page + `/scan` + `/save` → a phone joins by the QR
+3. [x] Saved WiFi rejoins after a reboot; the setup page says why a join failed
 
 **Done:** first setup works from all three devices; range test with the C3 antenna on the car.
+
+Tested: Samsung A50 (Android). No captive popup on it, so the printed sticker carries
+`http://192.168.4.1`. Not yet tested: iPhone, PC, range.
 
 ### B. GIFs from a browser
 
