@@ -6,6 +6,13 @@
 #pragma once
 #include <stdint.h>
 
+// ---------- version ----------
+// CI stamps the release tag with -DFW_VERSION=\"v0.4.0\"; a desk build says "dev".
+#ifndef FW_VERSION
+#define FW_VERSION  "dev"
+#endif
+#define API_VERSION 1         // bump when the WiFi API (net.cpp) changes shape
+
 // ---------- I2C bus ----------
 #define PIN_SDA     8
 #define PIN_SCL     9

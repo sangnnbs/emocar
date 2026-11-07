@@ -167,3 +167,32 @@ bool animSlotInfo(int slot, uint16_t &frames, uint32_t &bytes) {
   frames = fsInfo[slot].frames; bytes = fsBytes[slot];
   return true;
 }
+
+bool animUploadLenOk(uint32_t len) {
+  return len >= QGIF_HDR_MAX + 2 + DISP_FRAME_BYTES && len <= ANIM_MAX_BYTES;
+}
+
+bool animCommitTmp(int slot, uint32_t len, QgifInfo &info, char *err, size_t errLen) {
+  uint32_t size;
+  if (!validSlot(slot)) {
+    snprintf(err, errLen, "bad slot");
+  } else if (!qgifCheckFile(ANIM_TMP_PATH, info, size) || size != len) {
+    snprintf(err, errLen, "not a %dx%d %s qgif", DISP_W, DISP_H, dispFormatName());
+  } else {
+    char path[24]; animSlotPath(slot, path, sizeof path);
+    LittleFS.remove(path);
+    if (LittleFS.rename(ANIM_TMP_PATH, path)) {
+      animReload(slot);
+      return true;
+    }
+    snprintf(err, errLen, "rename failed");
+  }
+  LittleFS.remove(ANIM_TMP_PATH);
+  return false;
+}
+
+bool animBuiltin(int slot, const uint8_t *&data, uint32_t &len) {
+  if (!validSlot(slot) || !pmValid[slot]) return false;
+  data = ANIM[slot].data; len = ANIM[slot].len;
+  return true;
+}

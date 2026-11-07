@@ -1,5 +1,5 @@
 // cmd.h — line-framed command protocol over USB serial, spoken by the Go server in server/:
-//   STATUS          -> OK {slot files, heap, uptime, display profile}
+//   STATUS          -> OK {fw, api, slot files, heap, uptime, display profile}
 //   ZERO            -> OK; the telemetry orientation restarts from the current pose
 //   TELEM <s>       -> (no reply) stream telemetry for <s> seconds, 0 stops; see telem.h
 //   GET <n>         -> OK <len> + <len> raw bytes of the slot's .qgif
@@ -11,7 +11,9 @@
 //   CFG RESET       -> the same, back to the config.h defaults
 // A line longer than CMD_LINE_MAX is answered ERR and ignored, never cut short.
 // Replies start with OK / ERR / READY / ACK; any other line is telemetry or a debug log.
-// A PUT blocks the loop for the transfer.
+// A PUT blocks the loop for the transfer. The same slots take uploads over WiFi (net.cpp).
 #pragma once
+#include <stddef.h>
 
 void cmdPoll();   // call every loop
+int statusJson(char *buf, size_t n);   // the STATUS body, also served at GET /status over WiFi

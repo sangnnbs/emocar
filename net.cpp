@@ -6,8 +6,11 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <LittleFS.h>
+#include <uri/UriBraces.h>
 #include "net.h"
 #include "anim.h"
+#include "cmd.h"
 #include "motion.h"
 #include "setup_page.h"
 
@@ -80,7 +83,7 @@ static void handleSave() {
   WiFi.begin(ssid.c_str(), pass.c_str());
 }
 
-static void handleStatus() {
+static void handleJoin() {
   String out = "{\"state\":\"";
   out += join == J_IDLE ? "idle" : join == J_TRYING ? "trying" : join == J_OK ? "ok" : "fail";
   out += "\",\"ssid\":\"" + jsonEscape(trySsid) + "\",\"ip\":\"";
@@ -93,10 +96,87 @@ static void handleStatus() {
   sendJson(out);
 }
 
+static void handleStatus() {
+  char body[600];
+  statusJson(body, sizeof body);
+  server.sendHeader("Cache-Control", "no-store");
+  sendJson(body);
+}
+
+static int animSlotArg() {
+  String a = server.pathArg(0);
+  int slot = a.length() == 1 ? a[0] - '0' : -1;
+  return slot >= 0 && slot < CAR_STATE_COUNT ? slot : -1;
+}
+
+static void handleAnim() {
+  int slot = animSlotArg();
+  if (slot < 0) { server.send(400, "text/plain", "bad slot"); return; }
+  server.sendHeader("Cache-Control", "no-store");
+  uint16_t frames; uint32_t bytes;
+  char path[24]; animSlotPath(slot, path, sizeof path);
+  File f;
+  if (animSlotInfo(slot, frames, bytes) && (f = LittleFS.open(path, "r"))) {
+    server.streamFile(f, "application/octet-stream");
+    f.close();
+    return;
+  }
+  const uint8_t *data; uint32_t len;
+  if (animBuiltin(slot, data, len)) server.send_P(200, "application/octet-stream", (PGM_P)data, len);
+  else server.send(404, "text/plain", "no animation");
+}
+
+static File upFile;
+static char upErr[96];
+
+static bool isMultipart() { return server.header("Content-Type").startsWith("multipart/"); }
+
+// The body arrives in HTTP_RAW_BUFLEN pieces, each written to ANIM_TMP_PATH at once.
+static void animBody() {
+  if (isMultipart()) return;
+  HTTPRaw &r = server.raw();
+  if (r.status == RAW_START) {
+    upErr[0] = 0;
+    int slot = animSlotArg();
+    if (slot < 0) { snprintf(upErr, sizeof upErr, "bad slot"); return; }
+    if (!animUploadLenOk(server.clientContentLength())) { snprintf(upErr, sizeof upErr, "bad length"); return; }
+    animMessage("UPDATING", "receiving anim", carStateName((CarState)slot));
+    LittleFS.remove(ANIM_TMP_PATH);
+    upFile = LittleFS.open(ANIM_TMP_PATH, "w");
+    if (!upFile) snprintf(upErr, sizeof upErr, "open tmp failed");
+  } else if (r.status == RAW_WRITE) {
+    if (upErr[0] || !upFile) return;
+    if (upFile.write(r.buf, r.currentSize) != r.currentSize)
+      snprintf(upErr, sizeof upErr, "flash write failed at %u bytes", (unsigned)r.totalSize);
+  } else {
+    if (upFile) upFile.close();
+    if (r.status == RAW_ABORTED) {
+      LittleFS.remove(ANIM_TMP_PATH);
+      animShow(motionGet().state);
+    }
+  }
+}
+
+static void animPost() {
+  if (isMultipart()) { server.send(415, "text/plain", "send the .qgif as the raw body"); return; }
+  int slot = animSlotArg();
+  QgifInfo info;
+  uint32_t len = server.clientContentLength();
+  bool ok = !upErr[0] && animCommitTmp(slot, len, info, upErr, sizeof upErr);
+  if (!ok) LittleFS.remove(ANIM_TMP_PATH);
+  animShow(motionGet().state);
+  if (!ok) { server.send(400, "text/plain", upErr); return; }
+  sendJson(String("{\"frames\":") + info.frames + ",\"bytes\":" + len + "}");
+}
+
 static void handleOther() {
   if (mode != SETUP) { server.send(404, "text/plain", "Not found"); return; }
   server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
   server.send(302, "text/plain", "");
+}
+
+static WebServer::THandlerFunction setupOnly(void (*h)()) {
+  return [h] { if (mode == SETUP) h(); else handleOther(); };
 }
 
 static bool loadSaved(String &ssid, String &pass) {
@@ -124,13 +204,6 @@ static void startSetup() {
   WiFi.AP.enableDhcpCaptivePortal();
   dns.setErrorReplyCode(DNSReplyCode::NoError);
   dns.start(53, "*", WiFi.softAPIP());
-
-  server.on("/", HTTP_GET, [] { server.send_P(200, "text/html", SETUP_HTML); });
-  server.on("/scan", HTTP_GET, handleScan);
-  server.on("/save", HTTP_POST, handleSave);
-  server.on("/status", HTTP_GET, handleStatus);
-  server.onNotFound(handleOther);
-  server.begin();
   WiFi.scanNetworks(true);
 
   mode = SETUP;
@@ -145,11 +218,26 @@ void netBegin() {
   WiFi.setHostname(host);
 
   String ssid, pass;
-  if (!loadSaved(ssid, pass)) { startSetup(); return; }
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid.c_str(), pass.c_str());
-  joinStart = millis();
-  mode = JOINING;
+  if (loadSaved(ssid, pass)) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    joinStart = millis();
+    mode = JOINING;
+  } else {
+    startSetup();
+  }
+
+  server.on("/", HTTP_GET, setupOnly([] { server.send_P(200, "text/html", SETUP_HTML); }));
+  server.on("/scan", HTTP_GET, setupOnly(handleScan));
+  server.on("/save", HTTP_POST, setupOnly(handleSave));
+  server.on("/join", HTTP_GET, setupOnly(handleJoin));
+  server.on("/status", HTTP_GET, handleStatus);
+  server.on(UriBraces("/anim/{}"), HTTP_GET, handleAnim);
+  server.on(UriBraces("/anim/{}"), HTTP_POST, animPost, animBody);
+  const char *headers[] = {"Content-Type"};
+  server.collectHeaders(headers, 1);
+  server.onNotFound(handleOther);
+  server.begin();
 }
 
 static void tickJoining(uint32_t now) {
@@ -206,7 +294,7 @@ void netTick(uint32_t now) {
   if (mode == JOINING) tickJoining(now);
   else if (mode == SETUP) tickSetup(now);
   else tickOnline(now);
-  if (mode == SETUP) server.handleClient();
+  server.handleClient();
   if (msgShownAt && now - msgShownAt >= WIFI_IP_SHOW_MS) {
     msgShownAt = 0;
     animShow(motionGet().state);
