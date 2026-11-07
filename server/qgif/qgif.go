@@ -177,10 +177,43 @@ func decodeV1(data []byte) (*Anim, error) {
 
 // ConvertGIF turns a GIF into frames for a w×h panel of pixel format f.
 func ConvertGIF(data []byte, w, h int, f Format, o ConvOpts) (*Anim, error) {
-	p := struct {
-		W, H   int
-		Format Format
-	}{w, h, f}
+	s, err := SourceGIF(data, f)
+	if err != nil {
+		return nil, err
+	}
+	return s.Convert(w, h, o), nil
+}
+
+// Source is an animation decoded once, ready to be laid out again with other knobs
+// (the web app re-converts on every slider move). Frames are kept composited at the
+// source size, as luminance for mono1/gray4 or RGB for rgb565 — what layout() takes.
+type Source struct {
+	W, H   int
+	Format Format // the panel format the frames were prepared for
+	Delays []uint16
+	px     [][]uint8
+}
+
+// Convert lays the source out on a w×h panel of the source's format.
+func (s *Source) Convert(w, h int, o ConvOpts) *Anim {
+	o = o.norm(w, h)
+	a := &Anim{W: w, H: h, Format: s.Format, Delays: append([]uint16(nil), s.Delays...)}
+	for _, px := range s.px {
+		a.Bitmaps = append(a.Bitmaps, packFrame(px, s.W, s.H, w, h, s.Format, o))
+	}
+	return a
+}
+
+func (s *Source) add(canvas *image.RGBA) {
+	if s.Format == FmtRGB565 {
+		s.px = append(s.px, toRGB(canvas))
+	} else {
+		s.px = append(s.px, toGray(canvas))
+	}
+}
+
+// SourceGIF decodes a GIF for a panel of format f.
+func SourceGIF(data []byte, f Format) (*Source, error) {
 	g, err := gif.DecodeAll(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gif decode: %w", err)
@@ -191,16 +224,6 @@ func ConvertGIF(data []byte, w, h int, f Format, o ConvOpts) (*Anim, error) {
 	if len(g.Image) > maxFrames {
 		return nil, fmt.Errorf("gif: %d frames, max %d", len(g.Image), maxFrames)
 	}
-	if o.Threshold <= 0 {
-		o.Threshold = 128
-	}
-	if o.Zoom <= 0 {
-		o.Zoom = 100
-	} else if o.Zoom > zoomMax {
-		o.Zoom = zoomMax
-	}
-	o.PanX = min(max(o.PanX, -2*p.W), 2*p.W)
-	o.PanY = min(max(o.PanY, -2*p.H), 2*p.H)
 
 	// Composite frames the way PIL's GIF seek does: onto an opaque black canvas,
 	// honoring per-frame disposal.
@@ -212,7 +235,7 @@ func ConvertGIF(data []byte, w, h int, f Format, o ConvOpts) (*Anim, error) {
 	canvas := image.NewRGBA(image.Rect(0, 0, lw, lh))
 	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.Black), image.Point{}, draw.Src)
 
-	a := &Anim{W: p.W, H: p.H, Format: p.Format}
+	s := &Source{W: lw, H: lh, Format: f}
 	for i, pf := range g.Image {
 		var backup *image.RGBA
 		if i < len(g.Disposal) && g.Disposal[i] == gif.DisposalPrevious {
@@ -221,19 +244,7 @@ func ConvertGIF(data []byte, w, h int, f Format, o ConvOpts) (*Anim, error) {
 		}
 		draw.Draw(canvas, pf.Bounds(), pf, pf.Bounds().Min, draw.Over)
 
-		var frame []byte
-		if p.Format == FmtRGB565 {
-			rgb := layout(toRGB(canvas), lw, lh, 3, p.W, p.H, o.Scale, o.Zoom, o.PanX, o.PanY)
-			frame = packRGB565(rgb, p.W, p.H, o.Invert)
-		} else {
-			gray := layout(toGray(canvas), lw, lh, 1, p.W, p.H, o.Scale, o.Zoom, o.PanX, o.PanY)
-			if p.Format == FmtGray4 {
-				frame = packGray4(gray, p.W, p.H, o.Invert)
-			} else {
-				frame = packMono(gray, p.W, p.H, o.Threshold, o.Invert, o.Dither)
-			}
-		}
-		a.Bitmaps = append(a.Bitmaps, frame)
+		s.add(canvas)
 
 		ms := 100
 		if i < len(g.Delay) && g.Delay[i] > 0 {
@@ -242,7 +253,7 @@ func ConvertGIF(data []byte, w, h int, f Format, o ConvOpts) (*Anim, error) {
 		if ms > 0xFFFF {
 			ms = 0xFFFF
 		}
-		a.Delays = append(a.Delays, uint16(ms))
+		s.Delays = append(s.Delays, uint16(ms))
 
 		if i < len(g.Disposal) {
 			switch g.Disposal[i] {
@@ -253,7 +264,92 @@ func ConvertGIF(data []byte, w, h int, f Format, o ConvOpts) (*Anim, error) {
 			}
 		}
 	}
-	return a, nil
+	return s, nil
+}
+
+// SourceAnim takes an existing animation (a .qgif, e.g. the one a car plays now) as a
+// source, its frames drawn as the display shows them, for a panel of format f.
+// Delays are kept as they are.
+func SourceAnim(src *Anim, f Format) (*Source, error) {
+	if len(src.Bitmaps) == 0 {
+		return nil, fmt.Errorf("qgif: no frames")
+	}
+	s := &Source{W: src.W, H: src.H, Format: f, Delays: append([]uint16(nil), src.Delays...)}
+	for i := range src.Bitmaps {
+		s.add(src.FrameRGBA(i))
+	}
+	return s, nil
+}
+
+// ConvertAnim re-lays-out an existing animation for a w×h panel of format f: the same
+// scale/zoom/pan/invert path as ConvertGIF.
+func ConvertAnim(src *Anim, w, h int, f Format, o ConvOpts) (*Anim, error) {
+	s, err := SourceAnim(src, f)
+	if err != nil {
+		return nil, err
+	}
+	return s.Convert(w, h, o), nil
+}
+
+// FrameRGBA draws frame i the way the display shows it.
+func (a *Anim) FrameRGBA(i int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, a.W, a.H))
+	bm := a.Bitmaps[i]
+	for y := 0; y < a.H; y++ {
+		for x := 0; x < a.W; x++ {
+			var r, g, b uint8
+			switch a.Format {
+			case FmtMono1:
+				if bm[y*((a.W+7)/8)+x/8]&(1<<(7-x%8)) == 0 { // bit set = dark
+					r, g, b = 255, 255, 255
+				}
+			case FmtGray4:
+				v := bm[y*((a.W+1)/2)+x/2]
+				if x%2 == 0 {
+					v >>= 4
+				}
+				r = (v & 0x0F) * 17
+				g, b = r, r
+			case FmtRGB565:
+				v := uint16(bm[(y*a.W+x)*2])<<8 | uint16(bm[(y*a.W+x)*2+1])
+				r = uint8(int(v>>11) * 255 / 31)
+				g = uint8(int(v>>5&0x3F) * 255 / 63)
+				b = uint8(int(v&0x1F) * 255 / 31)
+			}
+			o := y*img.Stride + x*4
+			img.Pix[o], img.Pix[o+1], img.Pix[o+2], img.Pix[o+3] = r, g, b, 255
+		}
+	}
+	return img
+}
+
+// norm fills the defaults and clamps, for a w×h panel.
+func (o ConvOpts) norm(w, h int) ConvOpts {
+	if o.Threshold <= 0 {
+		o.Threshold = 128
+	}
+	if o.Zoom <= 0 {
+		o.Zoom = 100
+	} else if o.Zoom > zoomMax {
+		o.Zoom = zoomMax
+	}
+	o.PanX = min(max(o.PanX, -2*w), 2*w)
+	o.PanY = min(max(o.PanY, -2*h), 2*h)
+	return o
+}
+
+// packFrame lays one source frame (sw×sh luminance, or RGB for rgb565) out on the
+// w×h panel and packs it.
+func packFrame(px []uint8, sw, sh, w, h int, f Format, o ConvOpts) []byte {
+	if f == FmtRGB565 {
+		rgb := layout(px, sw, sh, 3, w, h, o.Scale, o.Zoom, o.PanX, o.PanY)
+		return packRGB565(rgb, w, h, o.Invert)
+	}
+	gray := layout(px, sw, sh, 1, w, h, o.Scale, o.Zoom, o.PanX, o.PanY)
+	if f == FmtGray4 {
+		return packGray4(gray, w, h, o.Invert)
+	}
+	return packMono(gray, w, h, o.Threshold, o.Invert, o.Dither)
 }
 
 // ITU-R 601 luminance, same weights as PIL's convert("L").
@@ -278,35 +374,6 @@ func toRGB(img *image.RGBA) []uint8 {
 		for x := 0; x < b.Dx(); x++ {
 			o := (y*b.Dx() + x) * 3
 			out[o], out[o+1], out[o+2] = row[x*4], row[x*4+1], row[x*4+2]
-		}
-	}
-	return out
-}
-
-// Resize with integer box sampling (fine for downscale, nearest for upscale),
-// ch interleaved channels per pixel.
-func resizeBox(src []uint8, sw, sh, ch, nw, nh int) []uint8 {
-	out := make([]uint8, nw*nh*ch)
-	for dy := 0; dy < nh; dy++ {
-		sy0, sy1 := dy*sh/nh, (dy+1)*sh/nh
-		if sy1 <= sy0 {
-			sy1 = sy0 + 1
-		}
-		for dx := 0; dx < nw; dx++ {
-			sx0, sx1 := dx*sw/nw, (dx+1)*sw/nw
-			if sx1 <= sx0 {
-				sx1 = sx0 + 1
-			}
-			for c := 0; c < ch; c++ {
-				sum, cnt := 0, 0
-				for y := sy0; y < sy1; y++ {
-					for x := sx0; x < sx1; x++ {
-						sum += int(src[(y*sw+x)*ch+c])
-						cnt++
-					}
-				}
-				out[(dy*nw+dx)*ch+c] = uint8(sum / cnt)
-			}
 		}
 	}
 	return out
@@ -338,23 +405,53 @@ func layout(px []uint8, sw, sh, ch, dw, dh int, mode string, zoom, panX, panY in
 		nw = max(1, nw*zoom/100)
 		nh = max(1, nh*zoom/100)
 	}
-	resized := resizeBox(px, sw, sh, ch, nw, nh)
+	// The image is resized to nw×nh and placed at (xo, yo) on the panel. Only the part
+	// that lands on the panel is computed: a zoomed-in image is mostly off-panel.
+	// Resizing is integer box sampling (fine for downscale, nearest for upscale): resized
+	// pixel x averages source columns xs[x]..xe[x]-1, likewise rows.
 	out := make([]uint8, dw*dh*ch) // black
 	xo, yo := (dw-nw)/2+panX, (dh-nh)/2+panY
-	for y := 0; y < nh; y++ {
-		ty := y + yo
-		if ty < 0 || ty >= dh {
-			continue
+	x0, x1 := max(0, -xo), min(nw, dw-xo)
+	y0, y1 := max(0, -yo), min(nh, dh-yo)
+	if x0 >= x1 || y0 >= y1 {
+		return out
+	}
+	xs, xe := boxEdges(x0, x1, sw, nw)
+	for y := y0; y < y1; y++ {
+		sy0, sy1 := y*sh/nh, (y+1)*sh/nh
+		if sy1 <= sy0 {
+			sy1 = sy0 + 1
 		}
-		for x := 0; x < nw; x++ {
-			tx := x + xo
-			if tx < 0 || tx >= dw {
-				continue
+		dst := out[((y+yo)*dw+x0+xo)*ch:]
+		for i := range xs {
+			cnt := (sy1 - sy0) * (xe[i] - xs[i])
+			for c := 0; c < ch; c++ {
+				sum := 0
+				for sy := sy0; sy < sy1; sy++ {
+					row := px[sy*sw*ch+c:]
+					for sx := xs[i]; sx < xe[i]; sx++ {
+						sum += int(row[sx*ch])
+					}
+				}
+				dst[i*ch+c] = uint8(sum / cnt)
 			}
-			copy(out[(ty*dw+tx)*ch:(ty*dw+tx)*ch+ch], resized[(y*nw+x)*ch:])
 		}
 	}
 	return out
+}
+
+// boxEdges gives, for resized columns from..to-1 of an s→n resize, the first and
+// one-past-last source column each one averages.
+func boxEdges(from, to, s, n int) (start, end []int) {
+	start, end = make([]int, to-from), make([]int, to-from)
+	for i := range start {
+		d := from + i
+		start[i], end[i] = d*s/n, (d+1)*s/n
+		if end[i] <= start[i] {
+			end[i] = start[i] + 1
+		}
+	}
+	return start, end
 }
 
 // ---------------------------------------------------------------- packers

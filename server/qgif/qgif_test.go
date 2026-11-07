@@ -107,3 +107,21 @@ func TestDecodeRejectsGarbage(t *testing.T) {
 		}
 	}
 }
+
+// Re-laying-out an animation at its own size with default knobs must not change a bit:
+// opening a car's face in the web app and sending it back leaves it as it was.
+func TestConvertAnimIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		f    Format
+		w, h int
+	}{{FmtMono1, 128, 64}, {FmtGray4, 128, 128}, {FmtRGB565, 240, 240}} {
+		a := testAnim(tc.f, tc.w, tc.h)
+		got, err := ConvertAnim(a, tc.w, tc.h, tc.f, ConvOpts{})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.f, err)
+		}
+		if !bytes.Equal(got.EncodeQGIF(), a.EncodeQGIF()) {
+			t.Fatalf("%s: not identical", tc.f)
+		}
+	}
+}
