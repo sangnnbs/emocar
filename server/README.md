@@ -154,7 +154,10 @@ serial.go      the car link: port auto-detect, reconnect, STATUS / GET / PUT
 telemetry.go   the dashboard's live feed: background reader, SSE fan-out, ZERO
 config.go      /configs API: CFG proxy, Export into config.h
 profiles.go    display profile registry (embeds profiles.json)
-qgif.go        GIF -> .qgif conversion per profile (composite, box resize, pack) + preview render
+qgif/          GIF -> .qgif conversion (composite, box resize, pack) + preview render;
+               shared by the server and the browser build
+cmd/qgif-wasm/ that conversion as qgif.wasm for the web app (`make wasm`);
+               compare_test.go checks its output is byte-identical to the server's (needs node)
 web/index.html the animations UI, embedded into the binary
 web/dashboard.html  the sensor dashboard (/dashboard), embedded too
 web/configs.html    the state conditions page (/configs), embedded too

@@ -1,22 +1,24 @@
 // qgif.go — GIF ⇄ QGIF conversion for any display profile.
 //
 // QGIF v2 container (little-endian):
-//   [0..3]   "QGF2" magic
-//   [4]      u8  format          0=mono1  1=gray4  2=rgb565
-//   [5..6]   u16 width
-//   [7..8]   u16 height
-//   [9..10]  u16 frames          (1..255 — firmware delay table caps at 255)
-//   [11..]   u16 delay_ms[frames]
-//   [..]     frames × frameBytes(format, w, h)
+//
+//	[0..3]   "QGF2" magic
+//	[4]      u8  format          0=mono1  1=gray4  2=rgb565
+//	[5..6]   u16 width
+//	[7..8]   u16 height
+//	[9..10]  u16 frames          (1..255 — firmware delay table caps at 255)
+//	[11..]   u16 delay_ms[frames]
+//	[..]     frames × frameBytes(format, w, h)
 //
 // Frame layouts:
-//   mono1  — ceil(w/8) B/row, MSB = leftmost pixel, bit 1 = DARK (firmware driver inverts)
-//   gray4  — ceil(w/2) B/row, high nibble = leftmost pixel, 0 = black .. 15 = white
-//   rgb565 — 2 B/pixel big-endian (RRRRRGGG GGGBBBBB), row-major
+//
+//	mono1  — ceil(w/8) B/row, MSB = leftmost pixel, bit 1 = DARK (firmware driver inverts)
+//	gray4  — ceil(w/2) B/row, high nibble = leftmost pixel, 0 = black .. 15 = white
+//	rgb565 — 2 B/pixel big-endian (RRRRRGGG GGGBBBBB), row-major
 //
 // Legacy v1 (decode only): u8 frames | u16 w=128 | u16 h=64 | u16 delays[] | 1024 B/frame,
 // same mono1 bit layout. Everything new is encoded as v2.
-package main
+package qgif
 
 import (
 	"bytes"
@@ -92,7 +94,7 @@ type Anim struct {
 }
 
 type ConvOpts struct {
-	Threshold int    // mono1: luminance below this = dark bit; default 128
+	Threshold int // mono1: luminance below this = dark bit; default 128
 	Invert    bool
 	Scale     string // fit | stretch | fit_width | fit_height
 	Dither    string // mono1: none | bayer | floyd
@@ -173,7 +175,12 @@ func decodeV1(data []byte) (*Anim, error) {
 
 // ---------------------------------------------------------------- GIF -> Anim
 
-func ConvertGIF(data []byte, p *Profile, o ConvOpts) (*Anim, error) {
+// ConvertGIF turns a GIF into frames for a w×h panel of pixel format f.
+func ConvertGIF(data []byte, w, h int, f Format, o ConvOpts) (*Anim, error) {
+	p := struct {
+		W, H   int
+		Format Format
+	}{w, h, f}
 	g, err := gif.DecodeAll(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gif decode: %w", err)

@@ -7,6 +7,7 @@ package main
 
 import (
 	_ "embed"
+	"emocar-server/qgif"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -124,18 +125,18 @@ func findEntry(name string) (libEntry, bool) {
 }
 
 // Convert a library entry with the given knobs (a .qgif is used as-is).
-func entryToAnim(e libEntry, p *Profile, o ConvOpts) (*Anim, error) {
+func entryToAnim(e libEntry, p *Profile, o qgif.ConvOpts) (*qgif.Anim, error) {
 	data, err := os.ReadFile(e.path)
 	if err != nil {
 		return nil, err
 	}
 	if e.Kind == "qgif" {
-		return DecodeQGIF(data)
+		return qgif.DecodeQGIF(data)
 	}
-	return ConvertGIF(data, p, o)
+	return qgif.ConvertGIF(data, p.W, p.H, p.Format, o)
 }
 
-func optsFromQuery(q map[string][]string) (*Profile, ConvOpts, error) {
+func optsFromQuery(q map[string][]string) (*Profile, qgif.ConvOpts, error) {
 	get := func(k string) string {
 		if v, ok := q[k]; ok && len(v) > 0 {
 			return v[0]
@@ -144,13 +145,13 @@ func optsFromQuery(q map[string][]string) (*Profile, ConvOpts, error) {
 	}
 	p, err := findProfile(get("profile"))
 	if err != nil {
-		return nil, ConvOpts{}, err
+		return nil, qgif.ConvOpts{}, err
 	}
 	t, _ := strconv.Atoi(get("threshold"))
 	z, _ := strconv.Atoi(get("zoom"))
 	px, _ := strconv.Atoi(get("panx"))
 	py, _ := strconv.Atoi(get("pany"))
-	return p, ConvOpts{Threshold: t, Invert: get("invert") == "1",
+	return p, qgif.ConvOpts{Threshold: t, Invert: get("invert") == "1",
 		Scale: get("scale"), Dither: get("dither"), Zoom: z, PanX: px, PanY: py}, nil
 }
 
@@ -270,7 +271,7 @@ func handleCarPreview(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 502, err.Error())
 		return
 	}
-	a, err := DecodeQGIF(data)
+	a, err := qgif.DecodeQGIF(data)
 	if err != nil {
 		jsonErr(w, 502, err.Error())
 		return
@@ -286,8 +287,9 @@ func handleCarPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/assign {"state":0..2,"name":"x.gif","profile":"sh1106_128x64",
-//                   "threshold":128,"invert":false,"scale":"fit","dither":"none",
-//                   "zoom":100,"panx":0,"pany":0}
+//
+//	"threshold":128,"invert":false,"scale":"fit","dither":"none",
+//	"zoom":100,"panx":0,"pany":0}
 func handleAssign(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		State     int    `json:"state"`
@@ -319,7 +321,7 @@ func handleAssign(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 404, "not in library")
 		return
 	}
-	a, err := entryToAnim(e, p, ConvOpts{Threshold: req.Threshold, Invert: req.Invert,
+	a, err := entryToAnim(e, p, qgif.ConvOpts{Threshold: req.Threshold, Invert: req.Invert,
 		Scale: req.Scale, Dither: req.Dither, Zoom: req.Zoom, PanX: req.PanX, PanY: req.PanY})
 	if err != nil {
 		jsonErr(w, 400, err.Error())
