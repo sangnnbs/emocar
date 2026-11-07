@@ -5,6 +5,7 @@ package main
 
 import (
 	_ "embed"
+	"emocar-server/qgif"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -28,7 +29,7 @@ type Profile struct {
 	H        int          `json:"height"`
 	FmtName  string       `json:"format"`
 	Defaults ConvDefaults `json:"defaults"`
-	Format   Format       `json:"-"`
+	Format   qgif.Format  `json:"-"`
 }
 
 var profiles []Profile
@@ -45,7 +46,7 @@ func loadProfiles() {
 	}
 	for i := range doc.Profiles {
 		p := &doc.Profiles[i]
-		f, err := ParseFormat(p.FmtName)
+		f, err := qgif.ParseFormat(p.FmtName)
 		if err != nil {
 			log.Fatalf("profiles.json: %s: %v", p.ID, err)
 		}
