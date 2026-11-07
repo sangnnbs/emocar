@@ -11,7 +11,7 @@ PORT      ?=                       # empty = let the server auto-detect the car
 
 JSON      := python3 -m json.tool
 
-.PHONY: help build run down open vet clean status assign dist
+.PHONY: help build run down open vet test wasm clean status assign dist
 
 help:
 	@echo "build      compile ./emocar-server"
@@ -22,6 +22,8 @@ help:
 	@echo "assign     push one GIF: make assign STATE=2 GIF=hoamat.gif [PROFILE=sh1106_128x64] [THRESHOLD=128] [INVERT=1] [SCALE=fit] [DITHER=none]"
 	@echo "           (needs the server running)"
 	@echo "vet        go vet"
+	@echo "test       go test (the wasm comparison needs node, else it is skipped)"
+	@echo "wasm       build qgif.wasm + wasm_exec.js for the web app into $(WASM_OUT)/"
 	@echo "clean      remove the binary and dist/"
 	@echo "dist       cross-compile release archives into dist/ [VERSION=v0.1.0]"
 
@@ -46,6 +48,18 @@ open:
 
 vet:
 	go vet ./...
+
+test:
+	go test ./...
+
+# The browser's GIF -> .qgif converter. wasm_exec.js must come from the same Go release
+# as the .wasm, so both are build outputs, never committed.
+WASM_OUT ?= ../web
+wasm:
+	mkdir -p $(WASM_OUT)
+	GOOS=js GOARCH=wasm go build -trimpath -ldflags '-s -w' -o $(WASM_OUT)/qgif.wasm ./cmd/qgif-wasm
+	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" $(WASM_OUT)/
+	@ls -l $(WASM_OUT)/qgif.wasm $(WASM_OUT)/wasm_exec.js
 
 clean:
 	rm -f emocar-server
