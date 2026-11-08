@@ -258,6 +258,104 @@ even a lone 1 KB burst lost 369 bytes into the stock 256-byte queue — hence `C
 bytes on a large payload, so `GET` raises it for the transfer. `cmdPoll()` serves one
 command per loop so the gyro FIFO keeps draining.
 
+## The Page — WiFi link (planned 2026-11-08, not built)
+
+The app lives at `https://sangnnbs.github.io/emocar/`. Users open it in **Chrome** and
+connect the car one of two ways: plug in USB (Web Serial, the same commands the Go server
+sends) or put the car on the home WiFi and give the Page its IP. Then everything else —
+state cards, GIF editor, `/configs`, `/dashboard` — works the same over either link.
+
+**Why it can work from github.io.** An https page calling `http://192.168.x.x` is mixed
+content, which Chrome allows only for a local address, behind a one-time Local Network
+Access prompt. Measured 2026-11-08, Chrome 156 on the Linux PC: after Allow, the request
+reached the car and failed only on CORS — the car sent no `Access-Control-Allow-Origin`. So
+the car has to send CORS headers; nothing else stands in the way. Two traps from that test:
+GitHub's own 404 page sends `connect-src 'self'`, so it can't be used as a test page, and the
+prompt appears only for a request started by a real click.
+
+### 1. Car joins the home WiFi — once per home
+
+The Page can't do this: a device on the car's hotspot has no internet, so it can't load
+github.io. The car serves this step itself (feature A).
+
+```
+User            Phone/PC (Chrome)              emocar
+ │ scan sticker QR ─▶ joins hotspot emocar-5674 ─▶ │
+ │                  opens http://192.168.4.1 ─────▶ │ setup page
+ │ pick WiFi, password, Join ─▶ POST /save ───────▶ │ joins home WiFi
+ │                  ◀── Done: IP 192.168.1.22 ───── │ OLED: 192.168.1.22
+ │                      [Open the emocar Page]      │ hotspot closes
+ │                  device falls back to home WiFi
+```
+
+The Done screen links to `https://sangnnbs.github.io/emocar/#car=192.168.1.22`, so the IP
+is never typed.
+
+### 2. The Page connects to the car
+
+```
+Chrome (github.io/emocar/)                    emocar (192.168.1.22)
+ │ IP from #car=…, or typed, or remembered
+ │ GET http://192.168.1.22/status  (targetAddressSpace: 'local')
+ │ ┌───────────────────────────────────────────────┐
+ │ │ first time only: "sangnnbs.github.io wants to │
+ │ │ access devices on your local network" [Allow] │
+ │ └───────────────────────────────────────────────┘
+ │ ─────────────────────────────────────────────▶ │
+ │ ◀── 200 {fw, api, w, h, slots…}                │
+ │     + Access-Control-Allow-Origin              │
+ │ is it an emocar? (fw + api fields) → save IP
+ │ ● connected · 192.168.1.22 · fw dev
+```
+
+- The permission is per site and per browser: asked once, then remembered.
+- Blocked or dismissed → the Page shows how to re-allow it (lock icon → Site settings →
+  Local network).
+
+### 3. Using it
+
+```
+Chrome                                         emocar
+ │ GET /anim/0..3 ────────────────────────────▶ │
+ │ ◀── .qgif × 4 → qgif.wasm decodes → 4 cards  │
+ │
+ │ upload GIF → editor → Apply
+ │ OPTIONS /anim/2 (CORS preflight) ───────────▶ │ allows POST from github.io
+ │ POST /anim/2 (.qgif) ───────────────────────▶ │ /anim.tmp → check → rename → plays
+ │ ◀── 200 → card updated
+ │
+ │ /configs  : GET/POST /cfg ──────────────────▶ │ WiFi twin of USB CFG
+ │ /dashboard: GET /telem (live gyro) ─────────▶ │ WiFi twin of USB TELEM
+ │
+ │ every ~3 s: GET /status → dot stays ●, or turns ○ not connected
+```
+
+### 4. Next visit
+
+```
+open github.io/emocar/ → IP remembered → GET /status → ● connected (no prompt)
+```
+
+### 5. When it goes wrong
+
+| Case | The Page |
+|---|---|
+| Car off, WiFi lost, or the router gave it a new IP | ○ not connected, retries every few seconds, "check the IP on the car's screen" + IP box |
+| Wrong IP — another device or nothing answers | "No emocar at this address" |
+| Local Network Access blocked | how to re-allow it in site settings |
+| IP keeps changing | type `emocar-5674.local` instead (needs mDNS), or reserve the IP in the router |
+
+A fixed IP in the firmware was rejected: a friend's router may use `192.168.0.x` or
+`10.0.0.x`, and a hard-coded address can clash with another device. A DHCP reservation in
+the router gives the same result without either problem.
+
+### Firmware this needs
+
+1. CORS headers on `/status`, `/anim`, `/cfg`, `/telem`, and an answer to `OPTIONS`.
+2. `MDNS.begin` — today `net.cpp` only sets the hostname, so `emocar-5674.local` doesn't resolve.
+3. `/cfg` and `/telem` routes — the WiFi twins of the USB `CFG` and `TELEM` commands.
+4. The `#car=<ip>` link on the setup page's Done screen.
+
 ## Animation player
 
 Frames are handed to the panel driver in qgif polarity; the SH1106 backend inverts (qgif
