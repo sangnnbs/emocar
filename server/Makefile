@@ -11,7 +11,7 @@ PORT      ?=                       # empty = let the server auto-detect the car
 
 JSON      := python3 -m json.tool
 
-.PHONY: help build run down open vet test wasm web clean status assign dist
+.PHONY: help build run down open vet test wasm web app clean status assign dist
 
 help:
 	@echo "build      compile ./emocar-server"
@@ -26,6 +26,7 @@ help:
 	@echo "wasm       build qgif.wasm + wasm_exec.js for the web app into $(WASM_OUT)/"
 	@echo "web        wasm + i18n.js: everything the WiFi web app in $(WASM_OUT)/ needs"
 	@echo "           (make run serves it at /app/; open http://<car>/?app=http://<this PC>:8080/app/)"
+	@echo "app        the whole web app in one folder, as Pages serves it: make app OUT=dir"
 	@echo "clean      remove the binary and dist/"
 	@echo "dist       cross-compile release archives into dist/ [VERSION=v0.1.0]"
 
@@ -66,6 +67,12 @@ wasm:
 # The app shares the EN | VI strings with the server pages.
 web: wasm
 	cp web/i18n.js $(WASM_OUT)/
+
+# One folder with everything the starter page loads — what CI deploys to app/<tag>/.
+app:
+	@test -n "$(OUT)" || { echo "usage: make app OUT=dir"; exit 1; }
+	$(MAKE) web WASM_OUT=$(abspath $(OUT))
+	cp ../web/app.js ../web/app.css $(OUT)/
 
 clean:
 	rm -f emocar-server
