@@ -1,4 +1,5 @@
 # Builds the WiFi web app and deploys it to GitHub Pages (https://sangnnbs.github.io/emocar/):
+#   index.html  the site root, from web/index.html
 #   app/dev/    from main — what a desk build of the firmware (FW_VERSION "dev") loads
 #   app/<tag>/  from every release tag that has web/app.js — what that release's firmware loads
 # The whole site is rebuilt on every run, so each deploy carries every version again.
@@ -46,6 +47,8 @@ jobs:
       - name: Build the site
         run: |
           site="$RUNNER_TEMP/site"
+          mkdir -p "$site"
+          cp web/index.html "$site/"
           make -C server app OUT="$site/app/dev"
           for tag in $(git tag -l 'v*'); do
             git cat-file -e "$tag:web/app.js" 2>/dev/null || continue
