@@ -1,0 +1,69 @@
+# Builds the WiFi web app and deploys it to GitHub Pages (https://sangnnbs.github.io/emocar/):
+#   app/dev/    from main — what a desk build of the firmware (FW_VERSION "dev") loads
+#   app/<tag>/  from every release tag that has web/app.js — what that release's firmware loads
+# The whole site is rebuilt on every run, so each deploy carries every version again.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - server/qgif/**
+      - server/cmd/qgif-wasm/**
+      - server/web/i18n.js
+      - server/go.mod
+      - server/Makefile
+      - .github/workflows/pages.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # main, also when a release triggers the run: app/dev/ is always main's app.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build the site
+        run: |
+          site="$RUNNER_TEMP/site"
+          make -C server app OUT="$site/app/dev"
+          for tag in $(git tag -l 'v*'); do
+            git cat-file -e "$tag:web/app.js" 2>/dev/null || continue
+            git worktree add -q "$RUNNER_TEMP/src-$tag" "$tag"
+            make -C "$RUNNER_TEMP/src-$tag/server" app OUT="$site/app/$tag"
+          done
+          find "$site" -type f | sort
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
