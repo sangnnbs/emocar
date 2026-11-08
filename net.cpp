@@ -13,6 +13,7 @@
 #include "cmd.h"
 #include "motion.h"
 #include "setup_page.h"
+#include "app_page.h"
 
 enum Mode { JOINING, SETUP, ONLINE };
 enum Join { J_IDLE, J_TRYING, J_OK, J_FAIL };
@@ -227,7 +228,7 @@ void netBegin() {
     startSetup();
   }
 
-  server.on("/", HTTP_GET, setupOnly([] { server.send_P(200, "text/html", SETUP_HTML); }));
+  server.on("/", HTTP_GET, [] { server.send_P(200, "text/html", mode == SETUP ? SETUP_HTML : APP_HTML); });
   server.on("/scan", HTTP_GET, setupOnly(handleScan));
   server.on("/save", HTTP_POST, setupOnly(handleSave));
   server.on("/join", HTTP_GET, setupOnly(handleJoin));
